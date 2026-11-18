@@ -71,14 +71,53 @@ def save_details(details):
 
 def team_mapping():
     defaults = {f"Team SPG {number}": f"Team SPG {number}" for number in range(1, 21)}
+    if not os.path.exists(TEAM_NAMES_FILE):
+        return defaults
     mapping = read_json(TEAM_NAMES_FILE, {})
     if isinstance(mapping, dict):
-        defaults.update({key: str(mapping.get(key, key)) for key in defaults})
+        defaults.update({key: str(mapping.get(key, key)).strip() for key in defaults})
     return defaults
 
 
 def team_choices():
-    return list(team_mapping().values())
+    return [team for team in team_mapping().values() if team]
+
+
+def schedule_team_names(frame, date_cols):
+    names = []
+    seen = set()
+    for _, row in frame.iterrows():
+        for date_col in date_cols:
+            value = row.get(date_col)
+            if not is_active(value):
+                continue
+            name = str(value).strip()
+            normalized = name.casefold()
+            if normalized not in seen:
+                seen.add(normalized)
+                names.append(name)
+    return names
+
+
+def save_team_names_from_schedule(team_names):
+    if len(team_names) > 20:
+        st.error("Jadwal memuat lebih dari 20 team. Master Nama Team hanya mendukung 20 team.")
+        return False
+    if not team_names:
+        st.error("Jadwal harus memuat minimal satu nama team aktif.")
+        return False
+
+    mapping = {
+        f"Team SPG {number}": team_names[number - 1] if number <= len(team_names) else ""
+        for number in range(1, 21)
+    }
+    try:
+        with open(TEAM_NAMES_FILE, "w", encoding="utf-8") as file:
+            json.dump(mapping, file, ensure_ascii=False, indent=2)
+        return True
+    except (OSError, TypeError, ValueError) as exc:
+        st.error(f"Gagal menyimpan master nama team dari jadwal: {exc}")
+        return False
 
 
 def brands_for_team(team):
@@ -801,11 +840,16 @@ def render_schedule_entry():
                     hide_index=True,
                 )
                 st.warning("Tindakan ini mengganti seluruh jadwal aktif dengan isi file di atas.")
+                uploaded_team_names = schedule_team_names(upload_frame, upload_date_cols)
+                if len(uploaded_team_names) > 20:
+                    st.error("File jadwal berisi lebih dari 20 team; jumlah maksimum yang didukung adalah 20.")
+                elif not uploaded_team_names:
+                    st.error("File jadwal harus berisi minimal satu nama team aktif.")
                 if st.button(
                     "Ganti Jadwal Aktif dengan File Excel Ini",
                     type="primary",
                     key="confirm_schedule_excel_upload",
-                ):
+                ) and 0 < len(uploaded_team_names) <= 20:
                     updated_details = retain_matching_schedule_details(
                         load_details(),
                         upload_frame,
@@ -835,9 +879,17 @@ def render_schedule_entry():
                                 updated_details[key] = saved
                     if save_schedule(upload_frame):
                         if save_details(updated_details):
-                            st.success("Jadwal berhasil diperbarui dari file Excel.")
-                            st.rerun()
-                        st.error(
-                            "Jadwal berhasil diperbarui, tetapi sinkronisasi detail kendaraan/brand gagal. "
-                            "Periksa kembali detail jadwal."
-                        )
+                            if save_team_names_from_schedule(uploaded_team_names):
+                                st.success(
+                                    f"Jadwal berhasil diperbarui. {len(uploaded_team_names)} nama team "
+                                    "diisi berurutan pada Master Data: Nama Team."
+                                )
+                                st.rerun()
+                            st.error(
+                                "Jadwal berhasil diperbarui, tetapi Master Nama Team gagal disinkronkan."
+                            )
+                        else:
+                            st.error(
+                                "Jadwal berhasil diperbarui, tetapi sinkronisasi detail kendaraan/brand gagal. "
+                                "Periksa kembali detail jadwal."
+                            )

@@ -457,10 +457,14 @@ def load_master_team_names():
         try:
             with open(MASTER_TEAM_NAME_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                if not isinstance(data, dict):
+                    return default_teams
                 for i in range(1, 21):
                     key = f"Team SPG {i}"
                     if key not in data:
                         data[key] = key
+                    else:
+                        data[key] = str(data[key]).strip()
                 return data
         except Exception:
             return default_teams
@@ -469,9 +473,24 @@ def load_master_team_names():
         return default_teams
 
 def save_master_team_names(team_names_dict):
+    active_names = [str(name).strip() for name in team_names_dict.values() if str(name).strip()]
+    if not active_names:
+        st.error("Minimal satu nama team harus diisi. Unggah jadwal SPG untuk mengatur nama team otomatis.")
+        return False
+    if len({name.casefold() for name in active_names}) != len(active_names):
+        st.error("Nama team tidak boleh duplikat.")
+        return False
     try:
         with open(MASTER_TEAM_NAME_FILE, "w", encoding="utf-8") as f:
-            json.dump(team_names_dict, f, ensure_ascii=False, indent=2)
+            json.dump(
+                {
+                    f"Team SPG {i}": str(team_names_dict.get(f"Team SPG {i}", "")).strip()
+                    for i in range(1, 21)
+                },
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
         return True
     except Exception as e:
         st.error(f"Gagal menyimpan master nama team: {e}")
@@ -498,14 +517,14 @@ def save_master_brands(brands):
 def load_master_team_brands():
     current_brands = load_master_brands()
     team_map = load_master_team_names()
-    default_teams = {team_map.get(f"Team SPG {i}", f"Team SPG {i}"): current_brands.copy() for i in range(1, 21)}
+    active_team_names = [team_map[f"Team SPG {i}"] for i in range(1, 21) if team_map[f"Team SPG {i}"]]
+    default_teams = {team_name: current_brands.copy() for team_name in active_team_names}
     if os.path.exists(MASTER_TEAM_BRAND_FILE):
         try:
             with open(MASTER_TEAM_BRAND_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                for i in range(1, 21):
+                for i, t_name in enumerate(active_team_names, start=1):
                     t_key = f"Team SPG {i}"
-                    t_name = team_map.get(t_key, t_key)
                     if t_name not in data and t_key not in data:
                         data[t_name] = current_brands.copy()
                 return data
@@ -855,7 +874,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                 key = f"Team SPG {i}"
                 current_val = team_names_map.get(key, key)
                 new_val = st.text_input(f"Nama untuk `{key}`", value=current_val, key=f"input_team_name_{i}")
-                updated_names[key] = new_val.strip() if new_val.strip() else key
+                updated_names[key] = new_val.strip()
 
             btn_save_team_names = st.form_submit_button("💾 Simpan Perubahan Nama Team", type="primary")
 
@@ -922,7 +941,18 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
         all_available_brands = load_master_brands()
         team_brands_dict = load_master_team_brands()
         team_name_mapping = load_master_team_names()
-        team_options = [team_name_mapping.get(f"Team SPG {i}", f"Team SPG {i}") for i in range(1, 21)]
+        active_team_slots = [
+            (f"Team SPG {i}", team_name_mapping[f"Team SPG {i}"])
+            for i in range(1, 21)
+            if team_name_mapping[f"Team SPG {i}"]
+        ]
+        team_options = [team_name for _, team_name in active_team_slots]
+        if not team_options:
+            st.info("Belum ada nama team. Unggah jadwal SPG untuk mengisi daftar team.")
+            if st.button("⬅️ Kembali ke Dashboard", key="btn_back_master_team_empty"):
+                st.session_state["admin_view"] = "Dashboard"
+                st.rerun()
+            st.stop()
 
         selected_team_config = st.selectbox(
             "Pilih Team SPG untuk Konfigurasi Brand",
@@ -953,9 +983,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
         st.markdown("#### 📋 Ringkasan Alokasi Brand Seluruh Team (1 - 20)")
         fresh_team_brands = load_master_team_brands()
         summary_list = []
-        for i in range(1, 21):
-            t_key = f"Team SPG {i}"
-            t_name = team_name_mapping.get(t_key, t_key)
+        for t_key, t_name in active_team_slots:
             b_list = fresh_team_brands.get(t_name, fresh_team_brands.get(t_key, []))
             summary_list.append({
                 "Team": t_name,
@@ -1920,7 +1948,14 @@ if not st.session_state["logged_in"]:
 
         with st.container():
             team_name_mapping = load_master_team_names()
-            list_team = [team_name_mapping.get(f"Team SPG {i}", f"Team SPG {i}") for i in range(1, 21)]
+            list_team = [
+                team_name_mapping[f"Team SPG {i}"]
+                for i in range(1, 21)
+                if team_name_mapping[f"Team SPG {i}"]
+            ]
+            if not list_team:
+                st.info("Belum ada nama team aktif. Admin perlu mengunggah jadwal SPG terlebih dahulu.")
+                st.stop()
             pilihan_user = st.selectbox(
                 "👤 Pilih Nama Team",
                 list_team,
