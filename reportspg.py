@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from io import BytesIO
 import json
 import requests
@@ -215,20 +215,33 @@ EXPECTED_SUPERVISI_COLUMNS = [
 def df_to_sheet_rows(df: pd.DataFrame):
     if df is None:
         return []
-    df_clean = df.copy()
-    if df_clean.empty:
-        return [df_clean.columns.tolist()] if len(df_clean.columns) else []
-    
-    # Ganti semua nilai NaN, NaT, atau None dengan string kosong ""
-    df_clean = df_clean.where(pd.notnull(df_clean), "")
-    
-    # Konversi semua kolom bertipe datetime standar atau objek datetime tersembunyi
-    for col in df_clean.columns:
-        df_clean[col] = df_clean[col].apply(
-            lambda x: x.strftime("%Y-%m-%d %H:%M:%S") if isinstance(x, (datetime, pd.Timestamp)) else str(x) if x != "" else ""
-        )
-        
-    return [df_clean.columns.tolist()] + df_clean.values.tolist()
+    columns = [str(column) for column in df.columns]
+    if df.empty:
+        return [columns] if columns else []
+
+    rows = []
+    for row in df.itertuples(index=False, name=None):
+        serialized_row = []
+        for value in row:
+            if pd.isna(value):
+                serialized_row.append("")
+            elif isinstance(value, (datetime, pd.Timestamp)):
+                serialized_row.append(value.strftime("%Y-%m-%d %H:%M:%S"))
+            elif isinstance(value, date):
+                serialized_row.append(value.isoformat())
+            else:
+                serialized_row.append(str(value))
+        rows.append(serialized_row)
+
+    return [columns] + rows
+
+def google_json_default(value):
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    item = getattr(value, "item", None)
+    if callable(item):
+        return item()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 def sheet_rows_to_df(rows, expected_columns=None):
     if not rows:
@@ -244,7 +257,13 @@ def sheet_rows_to_df(rows, expected_columns=None):
     return df
 
 def post_google_sheet(payload):
-    response = requests.post(WEB_APP_URL, json=payload, timeout=(10, 120))
+    payload_json = json.dumps(payload, ensure_ascii=False, default=google_json_default)
+    response = requests.post(
+        WEB_APP_URL,
+        data=payload_json,
+        headers={"Content-Type": "application/json"},
+        timeout=(10, 120),
+    )
     try:
         response.raise_for_status()
     except requests.HTTPError as exc:
