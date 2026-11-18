@@ -687,6 +687,8 @@ def render_schedule_entry():
 
             for entry in visible_entries:
                 entry_id = f"{entry['row']}_{entry['date_col']}"
+                team_widget_key = f"team_{entry_id}_{entry['team']}"
+                vehicle_widget_key = f"vehicle_{entry_id}_{entry['vehicle']}"
                 heading = (
                     f"{entry['date'].strftime('%d-%m-%Y')} · "
                     f"{entry['district'] or 'Kecamatan belum diisi'} · {entry['team']} · "
@@ -717,13 +719,13 @@ def render_schedule_entry():
                         with col_team_edit:
                             edited_team = st.selectbox(
                                 "Master Team SPG", entry_teams,
-                                index=entry_teams.index(entry["team"]), key=f"team_{entry_id}",
+                                index=entry_teams.index(entry["team"]), key=team_widget_key,
                             )
                         col_vehicle_edit, col_brands_edit = st.columns(2)
                         with col_vehicle_edit:
                             edited_vehicle = st.selectbox(
                                 "Kendaraan / Plat Nomor", entry_vehicles,
-                                index=entry_vehicles.index(saved_vehicle), key=f"vehicle_{entry_id}",
+                                index=entry_vehicles.index(saved_vehicle), key=vehicle_widget_key,
                             )
                         with col_brands_edit:
                             edited_brands = st.multiselect(
