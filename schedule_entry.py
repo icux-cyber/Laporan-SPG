@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import date, timedelta
 from io import BytesIO
 import os
@@ -141,6 +142,19 @@ def parse_schedule_date(value):
     return parsed.date()
 
 
+def parse_flat_schedule_header(column):
+    label = str(column).strip()
+    lowered = label.casefold()
+    kind = "team"
+    if "kendaraan" in lowered or "plat" in lowered:
+        kind = "vehicle"
+        label = re.sub(r"(kendaraan|plat(?:\s*(?:nomor|nomer))?)", "", label, flags=re.IGNORECASE)
+    elif "nama team" in lowered:
+        label = re.sub(r"nama\s*team", "", label, flags=re.IGNORECASE)
+    label = label.strip(" -|:_/")
+    return parse_schedule_date(label), kind
+
+
 def validate_schedule_upload(uploaded_file):
     try:
         uploaded_file.seek(0)
@@ -169,6 +183,7 @@ def validate_schedule_upload(uploaded_file):
     }
     team_indexes = {}
     vehicle_indexes = {}
+    raw_has_two_header_rows = True
     for index, value in header.items():
         work_date = parse_schedule_date(value)
         if work_date is None:
@@ -203,23 +218,49 @@ def validate_schedule_upload(uploaded_file):
             return None, None, None, None, None, "Nama kolom pada file tidak boleh duplikat."
         city_col = next((col for col in frame.columns if "kota" in col.lower()), None)
         district_col = next((col for col in frame.columns if "kecamatan" in col.lower()), None)
-        date_cols = [col for col in frame.columns if col not in {city_col, district_col}]
         if not city_col or not district_col or city_col == district_col:
             return None, None, None, None, None, "File harus memiliki kolom Kota dan Kecamatan."
-        team_indexes = {}
-        for col in date_cols:
-            work_date = parse_schedule_date(col)
+
+        team_columns = {}
+        vehicle_indexes = {}
+        for col in frame.columns:
+            if col in {city_col, district_col}:
+                continue
+            work_date, column_kind = parse_flat_schedule_header(col)
             if work_date is None:
-                return None, None, None, None, None, f"Kolom '{col}' bukan tanggal yang valid."
+                return None, None, None, None, None, (
+                    f"Kolom '{col}' bukan tanggal jadwal atau kolom kendaraan bertanggal yang valid."
+                )
             date_key = date_column(work_date)
-            if date_key in team_indexes:
-                return None, None, None, None, None, f"Tanggal {date_key[:10]} muncul lebih dari sekali."
-            team_indexes[date_key] = col
-        frame = frame.rename(columns={column: key for key, column in team_indexes.items()})
+            target_columns = vehicle_indexes if column_kind == "vehicle" else team_columns
+            if date_key in target_columns:
+                column_label = "kendaraan/plat" if column_kind == "vehicle" else "nama team"
+                return None, None, None, None, None, (
+                    f"Kolom {column_label} untuk tanggal {date_key[:10]} muncul lebih dari sekali."
+                )
+            target_columns[date_key] = col
+        missing_team_dates = sorted(set(vehicle_indexes) - set(team_columns))
+        if missing_team_dates:
+            return None, None, None, None, None, (
+                f"Kolom kendaraan tidak memiliki kolom Nama Team untuk tanggal {missing_team_dates[0][:10]}."
+            )
+        if not team_columns:
+            return None, None, None, None, None, "File harus memiliki kolom tanggal dan Nama Team."
+
+        team_indexes = team_columns
         raw = frame
-        date_cols = [date_key for date_key in team_indexes]
         raw_city_col, raw_district_col = city_col, district_col
-        multi_header = False
+        frame = frame[[city_col, district_col, *team_columns.values()]].rename(
+            columns={
+                city_col: "Kota",
+                district_col: "Kecamatan",
+                **{column: date_key for date_key, column in team_columns.items()},
+            }
+        )
+        city_col, district_col = "Kota", "Kecamatan"
+        date_cols = [date_key for date_key in team_indexes]
+        multi_header = bool(vehicle_indexes)
+        raw_has_two_header_rows = False
     else:
         city_col, district_col = "Kota", "Kecamatan"
         date_cols = list(team_indexes)
@@ -254,16 +295,19 @@ def validate_schedule_upload(uploaded_file):
 
     uploaded_vehicles = {}
     if multi_header:
-        for _, source_row in raw.iloc[2:].iterrows():
+        source_rows = raw.iloc[2:].iterrows() if raw_has_two_header_rows else raw.iterrows()
+        for _, source_row in source_rows:
             city = str(source_row.get(raw_city_col, "")).strip()
             district = str(source_row.get(raw_district_col, "")).strip()
             if not city or not district or city.casefold() == "nan" or district.casefold() == "nan":
                 continue
-            for date_key, team_index in team_indexes.items():
-                if not is_active(source_row.get(team_index)):
+            for date_key, team_column in team_indexes.items():
+                if not is_active(source_row.get(team_column)):
                     continue
-                vehicle_index = vehicle_indexes.get(date_key)
-                vehicle = source_row.get(vehicle_index) if vehicle_index is not None else ""
+                vehicle_column = vehicle_indexes.get(date_key)
+                if vehicle_column is None:
+                    continue
+                vehicle = source_row.get(vehicle_column)
                 uploaded_vehicles[assignment_key(parse_schedule_date(date_key), city, district)] = (
                     "" if pd.isna(vehicle) else str(vehicle).strip()
                 )
@@ -612,7 +656,9 @@ def render_schedule_entry():
                 with st.expander(f"📍 {heading}", expanded=False):
                     brands_allowed = brands_for_team(entry["team"])
                     default_brands = [brand for brand in entry["brands"] if brand in brands_allowed]
-                    saved_vehicle = entry["vehicle"] if entry["vehicle"] in vehicles else vehicles[0]
+                    entry_teams = teams if entry["team"] in teams else [entry["team"], *teams]
+                    entry_vehicles = vehicles if entry["vehicle"] in vehicles else [entry["vehicle"], *vehicles]
+                    saved_vehicle = entry["vehicle"] or vehicles[0]
                     st.caption(f"{entry['week']} · Kendaraan: {entry['vehicle'] or 'Belum diatur'} · Brand: {', '.join(entry['brands']) or 'Belum diatur'}")
                     with st.form(f"edit_schedule_{entry_id}"):
                         col_date_edit, col_city_edit = st.columns(2)
@@ -630,11 +676,16 @@ def render_schedule_entry():
                             else:
                                 edited_district = st.selectbox("Kecamatan", district_options, index=district_index, key=f"district_{entry_id}")
                         with col_team_edit:
-                            team_index = teams.index(entry["team"]) if entry["team"] in teams else 0
-                            edited_team = st.selectbox("Master Team SPG", teams, index=team_index, key=f"team_{entry_id}")
+                            edited_team = st.selectbox(
+                                "Master Team SPG", entry_teams,
+                                index=entry_teams.index(entry["team"]), key=f"team_{entry_id}",
+                            )
                         col_vehicle_edit, col_brands_edit = st.columns(2)
                         with col_vehicle_edit:
-                            edited_vehicle = st.selectbox("Kendaraan / Plat Nomor", vehicles, index=vehicles.index(saved_vehicle), key=f"vehicle_{entry_id}")
+                            edited_vehicle = st.selectbox(
+                                "Kendaraan / Plat Nomor", entry_vehicles,
+                                index=entry_vehicles.index(saved_vehicle), key=f"vehicle_{entry_id}",
+                            )
                         with col_brands_edit:
                             edited_brands = st.multiselect(
                                 "Rokok yang dibawa", brands_for_team(edited_team), default=default_brands,
@@ -705,7 +756,8 @@ def render_schedule_entry():
     with tab_excel:
         st.markdown("#### Unduh dan unggah jadwal melalui Excel")
         st.caption(
-            "File menggunakan format jadwal aktif: kolom Kota, Kecamatan, lalu kolom tanggal. "
+            "Unggah jadwal dengan kolom Kota dan Kecamatan serta kolom tanggal untuk Nama Team dan "
+            "Kendaraan / Plat Nomor. Nilai team dan plat akan otomatis mengisi Jadwal Aktif. "
             "Unggah akan mengganti seluruh jadwal aktif setelah Anda memeriksa pratinjau. "
             "Detail kendaraan/brand dipertahankan untuk penugasan yang tetap sama."
         )
