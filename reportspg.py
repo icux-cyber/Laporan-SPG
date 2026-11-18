@@ -286,14 +286,10 @@ def post_google_sheet(payload):
         raise RuntimeError("Format respons Google Apps Script tidak valid.")
     return result
 
-# ====================================================
-# SIDEBAR: BACKUP & LOAD GOOGLE SHEET
-# ====================================================
-with st.sidebar:
-    st.divider()
-    with st.expander("☁️ Backup & Load Google Sheet", expanded=False):
-        st.caption("✅ Sinkronisasi database ke Google Spreadsheet.")
-        
+def render_google_sheet_backup_controls():
+    with st.expander("☁️ Backup & Load Data", expanded=False):
+        st.caption("Sinkronisasi database aplikasi dengan Google Spreadsheet.")
+
         btn_backup_gs = st.button("⬆️ Backup ke Sheet", use_container_width=True)
         btn_load_gs = st.button("⬇️ Load dari Sheet", use_container_width=True)
 
@@ -304,7 +300,7 @@ with st.sidebar:
                     df_sup = pd.read_csv(DB_SUPERVISI_KONTAK_FILE) if os.path.exists(DB_SUPERVISI_KONTAK_FILE) else pd.DataFrame(columns=EXPECTED_SUPERVISI_COLUMNS)
                     df_jdw = pd.read_excel(JADWAL_SPG_FILE) if os.path.exists(JADWAL_SPG_FILE) else pd.DataFrame()
                     df_wrk = pd.read_excel(MASTER_LOKASI_FILE) if os.path.exists(MASTER_LOKASI_FILE) else pd.DataFrame()
-                    
+
                     payload = {
                         "action": "backup",
                         "rekap_laporan": df_to_sheet_rows(df_rekap),
@@ -312,7 +308,7 @@ with st.sidebar:
                         "jadwal_spg": df_to_sheet_rows(df_jdw),
                         "master_warkop": df_to_sheet_rows(df_wrk),
                     }
-                    
+
                     res_json = post_google_sheet(payload)
                     if res_json.get("status") == "success":
                         st.success("✅ " + res_json.get("message", "Backup berhasil!"))
@@ -344,6 +340,7 @@ with st.sidebar:
                         st.error("❌ " + res_json.get("message", "Gagal load."))
             except Exception as e:
                 st.error(f"Error load: {e}")
+
 # ====================================================
 # FUNGSI BANTUAN UMUM
 # ====================================================
@@ -1376,6 +1373,10 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
         if st.button("⬅️ Keluar Admin", use_container_width=True):
             st.session_state["admin_logged_in"] = False
             st.rerun()
+
+    st.markdown("---")
+    st.markdown("#### ☁️ Backup & Load Data")
+    render_google_sheet_backup_controls()
 
     st.markdown("---")
     st.markdown("#### 🌐 Ringkasan Cepat Data Masuk (All User)")
