@@ -213,9 +213,11 @@ EXPECTED_SUPERVISI_COLUMNS = [
 ]
 
 def df_to_sheet_rows(df: pd.DataFrame):
-    if df is None or df.empty:
+    if df is None:
         return []
     df_clean = df.copy()
+    if df_clean.empty:
+        return [df_clean.columns.tolist()] if len(df_clean.columns) else []
     
     # Ganti semua nilai NaN, NaT, atau None dengan string kosong ""
     df_clean = df_clean.where(pd.notnull(df_clean), "")
@@ -227,6 +229,43 @@ def df_to_sheet_rows(df: pd.DataFrame):
         )
         
     return [df_clean.columns.tolist()] + df_clean.values.tolist()
+
+def sheet_rows_to_df(rows, expected_columns=None):
+    if not rows:
+        return pd.DataFrame(columns=expected_columns)
+
+    columns = [str(column) for column in rows[0]]
+    df = pd.DataFrame(rows[1:], columns=columns)
+    if expected_columns is not None:
+        for column in expected_columns:
+            if column not in df.columns:
+                df[column] = ""
+        return df[expected_columns]
+    return df
+
+def post_google_sheet(payload):
+    response = requests.post(WEB_APP_URL, json=payload, timeout=(10, 120))
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        raise RuntimeError(
+            f"Google Apps Script mengembalikan HTTP {response.status_code} "
+            f"(Content-Type: {response.headers.get('Content-Type', 'tidak diketahui')})."
+        ) from exc
+
+    try:
+        result = response.json()
+    except ValueError as exc:
+        raise RuntimeError(
+            "Google Apps Script tidak mengembalikan JSON "
+            f"(HTTP {response.status_code}, "
+            f"Content-Type: {response.headers.get('Content-Type', 'tidak diketahui')}). "
+            "Periksa URL Web App, akses deployment, dan handler doPost."
+        ) from exc
+
+    if not isinstance(result, dict):
+        raise RuntimeError("Format respons Google Apps Script tidak valid.")
+    return result
 
 # ====================================================
 # SIDEBAR: BACKUP & LOAD GOOGLE SHEET
@@ -255,43 +294,35 @@ with st.sidebar:
                         "master_warkop": df_to_sheet_rows(df_wrk),
                     }
                     
-                    response = requests.post(WEB_APP_URL, json=payload, timeout=30)
-                    if "application/json" not in response.headers.get("Content-Type", ""):
-                        st.error("❌ Respons bukan JSON. Pastikan di Apps Script: Deploy > Manage deployments > Who has access = 'Anyone' & deploy versi baru.")
+                    res_json = post_google_sheet(payload)
+                    if res_json.get("status") == "success":
+                        st.success("✅ " + res_json.get("message", "Backup berhasil!"))
                     else:
-                        res_json = response.json()
-                        if res_json.get("status") == "success":
-                            st.success("✅ " + res_json.get("message", "Backup berhasil!"))
-                        else:
-                            st.error("❌ " + res_json.get("message", "Gagal backup."))
+                        st.error("❌ " + res_json.get("message", "Gagal backup."))
             except Exception as e:
                 st.error(f"Error backup: {e}")
 
         if btn_load_gs:
             try:
                 with st.spinner("Memuat data dari Google Sheet..."):
-                    response = requests.post(WEB_APP_URL, json={"action": "load"}, timeout=30)
-                    if "application/json" not in response.headers.get("Content-Type", ""):
-                        st.error("❌ Respons bukan JSON. Cek izin akses Web App ('Anyone') di Apps Script.")
+                    res_json = post_google_sheet({"action": "load"})
+                    if res_json.get("status") == "success":
+                        data_gs = res_json.get("data", {})
+
+                        if "rekap_laporan" in data_gs and len(data_gs["rekap_laporan"]) > 0:
+                            sheet_rows_to_df(data_gs["rekap_laporan"], EXPECTED_COLUMNS).to_csv(DB_FILE, index=False)
+                        if "rekap_supervisi" in data_gs and len(data_gs["rekap_supervisi"]) > 0:
+                            sheet_rows_to_df(data_gs["rekap_supervisi"], EXPECTED_SUPERVISI_COLUMNS).to_csv(DB_SUPERVISI_KONTAK_FILE, index=False)
+                        if "jadwal_spg" in data_gs and len(data_gs["jadwal_spg"]) > 0:
+                            sheet_rows_to_df(data_gs["jadwal_spg"]).to_excel(JADWAL_SPG_FILE, index=False)
+                        if "master_warkop" in data_gs and len(data_gs["master_warkop"]) > 0:
+                            sheet_rows_to_df(data_gs["master_warkop"]).to_excel(MASTER_LOKASI_FILE, index=False)
+
+                        st.cache_data.clear()
+                        st.success("✅ Data berhasil dimuat dari Google Sheet!")
+                        st.rerun()
                     else:
-                        res_json = response.json()
-                        if res_json.get("status") == "success":
-                            data_gs = res_json.get("data", {})
-                            
-                            if "rekap_laporan" in data_gs and len(data_gs["rekap_laporan"]) > 0:
-                                sheet_rows_to_df(data_gs["rekap_laporan"], EXPECTED_COLUMNS).to_csv(DB_FILE, index=False)
-                            if "rekap_supervisi" in data_gs and len(data_gs["rekap_supervisi"]) > 0:
-                                sheet_rows_to_df(data_gs["rekap_supervisi"], EXPECTED_SUPERVISI_COLUMNS).to_csv(DB_SUPERVISI_KONTAK_FILE, index=False)
-                            if "jadwal_spg" in data_gs and len(data_gs["jadwal_spg"]) > 0:
-                                sheet_rows_to_df(data_gs["jadwal_spg"]).to_excel(JADWAL_SPG_FILE, index=False)
-                            if "master_warkop" in data_gs and len(data_gs["master_warkop"]) > 0:
-                                sheet_rows_to_df(data_gs["master_warkop"]).to_excel(MASTER_LOKASI_FILE, index=False)
-                                
-                            st.cache_data.clear()
-                            st.success("✅ Data berhasil dimuat dari Google Sheet!")
-                            st.rerun()
-                        else:
-                            st.error("❌ " + res_json.get("message", "Gagal load."))
+                        st.error("❌ " + res_json.get("message", "Gagal load."))
             except Exception as e:
                 st.error(f"Error load: {e}")
 # ====================================================
