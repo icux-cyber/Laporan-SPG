@@ -27,6 +27,7 @@ flowchart TB
     LOCAL["Penyimpanan Lokal\nCSV, Excel, dan JSON"]
     SHEET["Google Spreadsheet"]
     GAS["Google Apps Script\nWeb App"]
+    SUPABASE["Supabase\nPostgreSQL JSONB"]
 
     SPG --> ST
     SUP --> ST
@@ -38,6 +39,7 @@ flowchart TB
     ST <--> LOCAL
     ST --> GAS
     GAS <--> SHEET
+    ST --> SUPABASE
 ```
 
 ## Komponen Utama
@@ -48,7 +50,7 @@ flowchart TB
 | Modul jadwal | `schedule_entry.py` | Membaca/menulis jadwal, master team, alokasi kendaraan dan merek, serta kecamatan terjadwal |
 | Penyimpanan operasional | `*.csv`, `*.xlsx`, `*.json` | Menyimpan rekap laporan, kontak supervisi, jadwal, master data, dan detail penugasan |
 | Batas geografis | `Surabaya Barat.geojson`, `Gresik.geojson` | Memvalidasi posisi pengguna terhadap wilayah kerja |
-| Sinkronisasi awan | Google Apps Script + Google Spreadsheet | Backup dan pemuatan rekap laporan, supervisi, jadwal, serta master warkop |
+| Sinkronisasi awan | Google Apps Script + Google Spreadsheet; Supabase REST API | Backup dan pemuatan data melalui Google Sheets, serta snapshot backup ke Supabase |
 
 ## Alur Data
 
@@ -85,6 +87,37 @@ flowchart TB
 2. Tombol load menerima data hasil bacaan Sheet, lalu menulisnya kembali ke CSV/Excel
    lokal.
 3. Operasi sinkronisasi terjadi atas permintaan pengguna melalui kontrol admin.
+
+### Backup Supabase
+
+1. Tombol **Backup ke Supabase** menyimpan snapshot ke tabel
+   `public.app_backups` melalui Supabase REST API. Snapshot mencakup rekap laporan,
+   rekap supervisi, jadwal, master warkop, dan file master JSON.
+2. Buat tabel berikut di SQL Editor Supabase:
+
+   ```sql
+   create table if not exists public.app_backups (
+       id bigint generated always as identity primary key,
+       created_at timestamptz not null default now(),
+       data jsonb not null
+   );
+
+   alter table public.app_backups enable row level security;
+   ```
+
+3. Atur `SUPABASE_URL` dan `SUPABASE_KEY` pada Streamlit secrets atau environment.
+   `SUPABASE_KEY` harus berupa service-role key karena tabel tidak membuka akses
+   insert publik; simpan hanya di server dan jangan masukkan ke source code.
+
+   Contoh `.streamlit/secrets.toml`:
+
+   ```toml
+   SUPABASE_URL = "https://<project-ref>.supabase.co"
+   SUPABASE_KEY = "<service-role-key>"
+   ```
+
+4. Backup disimpan sebagai satu baris per operasi. Fitur pemulihan dari Supabase
+   belum disediakan; pemuatan data tetap menggunakan Google Sheets.
 
 ## Penyimpanan dan Entitas
 
@@ -125,9 +158,9 @@ File-based Data Store
   - CSV
   - XLSX
   - JSON
-  |
-  v
-Google Apps Script / Google Sheets (sinkronisasi opsional)
+  | \
+  |  +--> Google Apps Script / Google Sheets (sinkronisasi opsional)
+  +-----> Supabase PostgreSQL (snapshot backup opsional)
 ```
 
 ## Keamanan dan Operasional

@@ -286,11 +286,85 @@ def post_google_sheet(payload):
         raise RuntimeError("Format respons Google Apps Script tidak valid.")
     return result
 
+def load_supabase_backup_data():
+    df_rekap = pd.read_csv(DB_FILE) if os.path.exists(DB_FILE) else pd.DataFrame(columns=EXPECTED_COLUMNS)
+    df_sup = pd.read_csv(DB_SUPERVISI_KONTAK_FILE) if os.path.exists(DB_SUPERVISI_KONTAK_FILE) else pd.DataFrame(columns=EXPECTED_SUPERVISI_COLUMNS)
+    df_jdw = pd.read_excel(JADWAL_SPG_FILE) if os.path.exists(JADWAL_SPG_FILE) else pd.DataFrame()
+    df_wrk = pd.read_excel(MASTER_LOKASI_FILE) if os.path.exists(MASTER_LOKASI_FILE) else pd.DataFrame()
+
+    def read_json_file(file_path):
+        if not os.path.exists(file_path):
+            return None
+        with open(file_path, "r", encoding="utf-8") as file:
+            return json.load(file)
+
+    return {
+        "backup_version": 1,
+        "datasets": {
+            "rekap_laporan": df_to_sheet_rows(df_rekap),
+            "rekap_supervisi": df_to_sheet_rows(df_sup),
+            "jadwal_spg": df_to_sheet_rows(df_jdw),
+            "master_warkop": df_to_sheet_rows(df_wrk),
+        },
+        "master_data": {
+            "nama_spg": read_json_file(MASTER_SPG_FILE),
+            "nama_team": read_json_file(MASTER_TEAM_NAME_FILE),
+            "team_brand": read_json_file(MASTER_TEAM_BRAND_FILE),
+            "brand_rokok": read_json_file(MASTER_BRAND_FILE),
+            "target_brand": read_json_file(MASTER_TARGET_FILE),
+            "plat_kendaraan": read_json_file(MASTER_PLAT_FILE),
+            "jadwal_detail": read_json_file("jadwal_spg_detail.json"),
+        },
+    }
+
+def post_supabase_backup(snapshot):
+    try:
+        supabase_url = st.secrets.get("SUPABASE_URL", os.environ.get("SUPABASE_URL"))
+        supabase_key = st.secrets.get("SUPABASE_KEY", os.environ.get("SUPABASE_KEY"))
+    except FileNotFoundError:
+        supabase_url = os.environ.get("SUPABASE_URL")
+        supabase_key = os.environ.get("SUPABASE_KEY")
+
+    if not supabase_url or not supabase_key:
+        raise RuntimeError(
+            "Konfigurasi SUPABASE_URL dan SUPABASE_KEY belum tersedia di Streamlit secrets atau environment."
+        )
+
+    response = requests.post(
+        f"{supabase_url.rstrip('/')}/rest/v1/app_backups",
+        json={"data": snapshot},
+        headers={
+            "apikey": supabase_key,
+            "Authorization": f"Bearer {supabase_key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        },
+        timeout=(10, 120),
+    )
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        raise RuntimeError(
+            f"Supabase mengembalikan HTTP {response.status_code}: {response.text[:500]}"
+        ) from exc
+
 def render_google_sheet_backup_controls():
     with st.expander("☁️ Backup & Load Data", expanded=False):
-        st.caption("Sinkronisasi database aplikasi dengan Google Spreadsheet.")
+        st.caption("Backup data aplikasi ke Google Spreadsheet atau Supabase.")
 
-        btn_backup_gs = st.button("⬆️ Backup ke Sheet", use_container_width=True)
+        col_backup_gs, col_backup_supabase = st.columns(2)
+        with col_backup_gs:
+            btn_backup_gs = st.button(
+                "⬆️ Backup ke Sheet",
+                use_container_width=True,
+                key="backup_google_sheet",
+            )
+        with col_backup_supabase:
+            btn_backup_supabase = st.button(
+                "⬆️ Backup ke Supabase",
+                use_container_width=True,
+                key="backup_supabase",
+            )
         btn_load_gs = st.button("⬇️ Load dari Sheet", use_container_width=True)
 
         if btn_backup_gs:
@@ -316,6 +390,15 @@ def render_google_sheet_backup_controls():
                         st.error("❌ " + res_json.get("message", "Gagal backup."))
             except Exception as e:
                 st.error(f"Error backup: {e}")
+
+        if btn_backup_supabase:
+            try:
+                with st.spinner("Mem-backup data ke Supabase..."):
+                    snapshot = load_supabase_backup_data()
+                    post_supabase_backup(snapshot)
+                    st.success("✅ Backup berhasil disimpan ke Supabase.")
+            except Exception as e:
+                st.error(f"Error backup Supabase: {e}")
 
         if btn_load_gs:
             try:
