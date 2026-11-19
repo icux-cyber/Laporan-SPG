@@ -1407,6 +1407,29 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
     render_google_sheet_backup_controls()
 
     st.markdown("---")
+    st.markdown("#### 📥 Unduh Data Utama")
+    st.caption("Unduhan ini hanya tersedia dari Dashboard Admin.")
+    col_download_laporan, col_download_supervisi = st.columns(2)
+    with col_download_laporan:
+        st.download_button(
+            "⬇️ Download Rekap Laporan SPG",
+            data=load_database().to_csv(index=False).encode("utf-8-sig"),
+            file_name=DB_FILE,
+            mime="text/csv",
+            use_container_width=True,
+            key="download_rekap_laporan_admin",
+        )
+    with col_download_supervisi:
+        st.download_button(
+            "⬇️ Download Rekap Kontak Supervisi",
+            data=load_supervisi_database().to_csv(index=False).encode("utf-8-sig"),
+            file_name=DB_SUPERVISI_KONTAK_FILE,
+            mime="text/csv",
+            use_container_width=True,
+            key="download_rekap_supervisi_admin",
+        )
+
+    st.markdown("---")
     st.markdown("#### 🌐 Ringkasan Cepat Data Masuk (All User)")
 
     df_all_users = load_database()
