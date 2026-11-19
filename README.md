@@ -116,8 +116,10 @@ flowchart TB
    SUPABASE_KEY = "<service-role-key>"
    ```
 
-4. Backup disimpan sebagai satu baris per operasi. Fitur pemulihan dari Supabase
-   belum disediakan; pemuatan data tetap menggunakan Google Sheets.
+4. Backup disimpan sebagai satu baris per operasi. Tombol **Load dari Supabase**
+   mengambil backup terbaru lalu mengganti seluruh data lokal yang tercakup dalam
+   snapshot, termasuk CSV, Excel, dan master JSON. Pemuatan Google Sheets tetap
+   tersedia secara terpisah.
 
 ## Penyimpanan dan Entitas
 
