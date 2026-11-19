@@ -80,6 +80,15 @@ flowchart TB
    kecamatan dan warkop/LKK.
 4. Rekap menampilkan jumlah kontak, konsumen beli, jumlah SPG, dan total bungkus.
 
+### Template Jadwal SPG
+
+1. Pada tab **Download / Upload Excel**, pilih tanggal acuan untuk minggu template
+   lalu unduh file Excel.
+2. Template berisi daftar kecamatan Surabaya dan Gresik, kolom Nama Team serta
+   Kendaraan/Plat Nomor untuk Senin–Jumat, dan pilihan team/plat dari master data.
+3. Isi jadwal pada file tersebut lalu unggah melalui menu yang sama. Format header
+   template sudah sesuai dengan validator upload jadwal.
+
 ### Sinkronisasi Google Sheets
 
 1. Tombol backup mengirim rekap laporan, rekap supervisi, jadwal, dan master warkop

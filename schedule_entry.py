@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from io import BytesIO
 import os
 
+import openpyxl
 import pandas as pd
 import streamlit as st
 
@@ -412,6 +413,77 @@ def build_schedule_excel(schedule, details, city_col, district_col):
     pd.DataFrame(rows).to_excel(buffer, index=False, header=False)
     return buffer.getvalue()
 
+def build_schedule_template_excel(week_anchor):
+    week_start = week_anchor - timedelta(days=week_anchor.weekday())
+    workdays = [week_start + timedelta(days=offset) for offset in range(5)]
+    locations = [
+        (city, district)
+        for city in CITIES
+        for district in get_geo_districts(city)
+    ]
+
+    header = ["Kota", "Kecamatan"]
+    subheader = ["", ""]
+    for workday in workdays:
+        header.extend([workday, None])
+        subheader.extend(["Nama Team", "Kendaraan / Plat Nomor"])
+
+    rows = [header, subheader]
+    rows.extend([[city, district, *("" for _ in range(len(workdays) * 2))] for city, district in locations])
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        pd.DataFrame(rows).to_excel(
+            writer, sheet_name="Jadwal SPG", index=False, header=False
+        )
+        workbook = writer.book
+        master_sheet = workbook.create_sheet("Master")
+        master_sheet["A1"] = "Nama Team"
+        master_sheet["B1"] = "Plat Kendaraan"
+        teams = team_choices()
+        vehicles = vehicle_choices()
+        for row_number, team in enumerate(teams, start=2):
+            master_sheet.cell(row=row_number, column=1, value=team)
+        for row_number, vehicle in enumerate(vehicles, start=2):
+            master_sheet.cell(row=row_number, column=2, value=vehicle)
+        master_sheet.sheet_state = "hidden"
+
+        worksheet = writer.sheets["Jadwal SPG"]
+        worksheet.freeze_panes = "C3"
+        worksheet.column_dimensions["A"].width = 18
+        worksheet.column_dimensions["B"].width = 24
+        for column_number in range(3, len(header) + 1):
+            worksheet.column_dimensions[
+                openpyxl.utils.get_column_letter(column_number)
+            ].width = 22
+
+        if locations:
+            last_row = len(rows)
+            team_last_row = max(2, len(teams) + 1)
+            vehicle_last_row = max(2, len(vehicles) + 1)
+            team_validation = openpyxl.worksheet.datavalidation.DataValidation(
+                type="list",
+                formula1=f'=INDIRECT("\'Master\'!$A$2:$A${team_last_row}")',
+                allow_blank=True,
+            )
+            vehicle_validation = openpyxl.worksheet.datavalidation.DataValidation(
+                type="list",
+                formula1=f'=INDIRECT("\'Master\'!$B$2:$B${vehicle_last_row}")',
+                allow_blank=True,
+            )
+            worksheet.add_data_validation(team_validation)
+            worksheet.add_data_validation(vehicle_validation)
+            for column_number in range(3, len(header) + 1, 2):
+                team_validation.add(
+                    f"{openpyxl.utils.get_column_letter(column_number)}3:"
+                    f"{openpyxl.utils.get_column_letter(column_number)}{last_row}"
+                )
+                vehicle_validation.add(
+                    f"{openpyxl.utils.get_column_letter(column_number + 1)}3:"
+                    f"{openpyxl.utils.get_column_letter(column_number + 1)}{last_row}"
+                )
+
+    return output.getvalue()
 
 def build_schedule_preview(frame, details, city_col, district_col, date_cols, uploaded_vehicles):
     preview_rows = []
@@ -803,12 +875,31 @@ def render_schedule_entry():
             "Detail kendaraan/brand dipertahankan untuk penugasan yang tetap sama."
         )
 
+        template_anchor = st.date_input(
+            "Tanggal acuan minggu template",
+            value=date.today(),
+            key="schedule_template_week",
+        )
+        st.caption(
+            "Template berisi seluruh kecamatan Surabaya dan Gresik untuk Senin–Jumat "
+            "pada minggu terpilih. Nama team dan plat kendaraan tersedia sebagai pilihan."
+        )
         st.download_button(
-            "⬇️ Download Jadwal SPG.xlsx",
+            "📄 Download Template Jadwal SPG",
+            data=build_schedule_template_excel(template_anchor),
+            file_name="Template Jadwal SPG.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key="download_schedule_template",
+        )
+
+        st.download_button(
+            "⬇️ Download Jadwal SPG Saat Ini",
             data=build_schedule_excel(schedule, details, city_col, district_col),
             file_name="Jadwal SPG.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
+            key="download_current_schedule",
         )
 
         uploaded_file = st.file_uploader(
