@@ -20,145 +20,229 @@ st.set_page_config(
     page_title="Laporan Dirsell SPG",
     page_icon="📍",
     layout="centered",
-    initial_sidebar_state="auto",
+    initial_sidebar_state="collapsed",
 )
 
 # ====================================================
-# CUSTOM CSS UNTUK UI MODERN
+# CUSTOM CSS UNTUK UI MODERN & MOBILE-FRIENDLY
 # ====================================================
 st.markdown(
     """
     <style>
-    .stApp {
-        background-color: #FDFBF7;
-        color: #334155;
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+    html, body, [class*="css"] {
+        font-family: 'Plus Jakarta Sans', sans-serif;
     }
+
+    /* Background Utama */
+    .stApp {
+        background-color: #F8FAFC;
+        color: #1E293B;
+    }
+
+    /* Header Login */
     .login-header {
-        background: linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%);
-        padding: 28px 20px;
-        border-radius: 16px;
+        background: linear-gradient(135deg, #DC2626 0%, #991B1B 100%);
+        padding: 32px 24px;
+        border-radius: 20px;
         color: white;
         text-align: center;
-        box-shadow: 0 8px 20px rgba(211, 47, 47, 0.25);
+        box-shadow: 0 12px 28px -6px rgba(220, 38, 38, 0.35);
         margin-bottom: 24px;
+        position: relative;
+        overflow: hidden;
     }
     .login-header h1 {
         margin: 0;
-        font-size: 1.75rem;
-        font-weight: 700;
-        letter-spacing: 0.5px;
+        font-size: 1.65rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
     }
     .login-header p {
-        margin: 8px 0 0 0;
-        font-size: 0.92rem;
-        opacity: 0.9;
+        margin: 6px 0 0 0;
+        font-size: 0.9rem;
+        color: #FEE2E2;
+        font-weight: 500;
     }
-    [data-testid="stForm"] {
-        background-color: #ffffff;
-        padding: 26px 24px;
+
+    /* Styling Container / Card */
+    .ui-card {
+        background-color: #FFFFFF;
+        padding: 22px;
         border-radius: 16px;
-        border: 1px solid #e2e8f0;
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.05);
-    }
-    [data-testid="stFormSubmitButton"] > button {
-        width: 100%;
-        background: linear-gradient(135deg, #d32f2f 0%, #9a0007 100%);
-        color: white;
-        font-weight: 600;
-        font-size: 1rem;
-        padding: 0.65rem 1rem;
-        border-radius: 10px;
-        border: none;
-        transition: all 0.25s ease;
-        margin-top: 10px;
-    }
-    [data-testid="stFormSubmitButton"] > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 14px rgba(211, 47, 47, 0.35);
-    }
-    .user-banner {
-        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
-        color: #f8fafc;
-        padding: 16px 20px;
-        border-radius: 14px;
+        border: 1px solid #E2E8F0;
+        box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.04);
         margin-bottom: 16px;
-        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
+    }
+
+    /* Form Styling */
+    [data-testid="stForm"] {
+        background-color: #FFFFFF;
+        padding: 24px 20px;
+        border-radius: 18px;
+        border: 1px solid #E2E8F0;
+        box-shadow: 0 8px 20px -4px rgba(15, 23, 42, 0.05);
+    }
+
+    /* Tombol Utama & Submit */
+    [data-testid="stFormSubmitButton"] > button,
+    div.stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%) !important;
+        color: #FFFFFF !important;
+        font-weight: 700 !important;
+        font-size: 0.95rem !important;
+        padding: 0.65rem 1.2rem !important;
+        border-radius: 12px !important;
+        border: none !important;
+        box-shadow: 0 4px 12px rgba(220, 38, 38, 0.25) !important;
+        transition: all 0.2s ease !important;
+    }
+    [data-testid="stFormSubmitButton"] > button:hover,
+    div.stButton > button[kind="primary"]:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 16px rgba(220, 38, 38, 0.35) !important;
+    }
+
+    /* Tombol Sekunder */
+    div.stButton > button[kind="secondary"] {
+        background-color: #FFFFFF !important;
+        color: #334155 !important;
+        font-weight: 600 !important;
+        border: 1px solid #CBD5E1 !important;
+        border-radius: 12px !important;
+        padding: 0.6rem 1rem !important;
+        transition: all 0.2s ease !important;
+    }
+    div.stButton > button[kind="secondary"]:hover {
+        border-color: #94A3B8 !important;
+        background-color: #F1F5F9 !important;
+    }
+
+    /* Input Fields */
+    .stTextInput input, .stNumberInput input, .stSelectbox div[data-baseweb="select"] > div {
+        border-radius: 10px !important;
+        border-color: #CBD5E1 !important;
+    }
+
+    /* User Banner setelah Login */
+    .user-banner {
+        background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+        color: #F8FAFC;
+        padding: 18px 20px;
+        border-radius: 16px;
+        margin-bottom: 16px;
+        box-shadow: 0 8px 20px -4px rgba(15, 23, 42, 0.2);
+        border-left: 5px solid #DC2626;
     }
     .user-banner-title {
-        font-size: 1.05rem;
+        font-size: 1.1rem;
         font-weight: 700;
-        margin-bottom: 4px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+    }
+    .badge-mode {
+        background-color: rgba(56, 189, 248, 0.15);
+        color: #38BDF8;
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        font-weight: 600;
     }
     .user-banner-sub {
-        font-size: 0.88rem;
-        color: #cbd5e1;
+        font-size: 0.85rem;
+        color: #CBD5E1;
     }
+
+    /* KPI Dashboard Card */
     .dashboard-card {
-        background-color: #ffffff;
-        border: 1px solid #e2e8f0;
-        padding: 20px 18px;
-        border-radius: 14px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.04);
-        margin-bottom: 14px;
-        min-height: 145px;
+        background-color: #FFFFFF;
+        border: 1px solid #E2E8F0;
+        padding: 18px;
+        border-radius: 16px;
+        box-shadow: 0 4px 10px -2px rgba(15, 23, 42, 0.04);
+        margin-bottom: 12px;
+        min-height: 138px;
         display: flex;
         flex-direction: column;
         justify-content: space-between;
+        transition: transform 0.2s ease;
+    }
+    .dashboard-card:hover {
+        transform: translateY(-2px);
+        border-color: #CBD5E1;
     }
     .card-value {
-        font-size: 1.9rem;
+        font-size: 1.75rem;
         font-weight: 800;
-        color: #1e293b;
-        margin-bottom: 2px;
-        line-height: 1.1;
+        color: #0F172A;
+        line-height: 1.15;
     }
     .card-value-green {
-        font-size: 1.9rem;
+        font-size: 1.75rem;
         font-weight: 800;
-        color: #16a34a;
-        margin-bottom: 2px;
-        line-height: 1.1;
+        color: #16A34A;
+        line-height: 1.15;
     }
     .card-subtext {
-        font-size: 0.85rem;
-        color: #64748b;
-        margin-bottom: 6px;
+        font-size: 0.8rem;
+        color: #64748B;
+        margin-top: 4px;
     }
     .card-label {
-        font-size: 0.95rem;
+        font-size: 0.88rem;
         color: #475569;
         font-weight: 600;
-        line-height: 1.3;
+        margin-top: 8px;
     }
+
+    /* Progress Bar */
     .progress-bar-container {
         width: 100%;
-        background-color: #f1f5f9;
-        border-radius: 6px;
+        background-color: #E2E8F0;
+        border-radius: 999px;
         height: 8px;
-        margin: 10px 0 6px 0;
+        margin: 10px 0 4px 0;
         overflow: hidden;
     }
     .progress-bar-fill {
         height: 100%;
-        background-color: #16a34a;
-        border-radius: 6px;
+        background: linear-gradient(90deg, #16A34A 0%, #22C55E 100%);
+        border-radius: 999px;
     }
+
+    /* Box Alamat Warkop */
+    .address-box {
+        background-color: #EFF6FF;
+        border: 1px solid #BFDBFE;
+        border-left: 4px solid #2563EB;
+        padding: 12px 16px;
+        border-radius: 12px;
+        font-size: 0.88rem;
+        color: #1E3A8A;
+        margin-top: 8px;
+        margin-bottom: 16px;
+    }
+
+    /* Section Title Pill */
+    .section-title {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: #0F172A;
+        margin: 18px 0 10px 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
     .footer-note {
         text-align: center;
-        font-size: 0.8rem;
-        color: #64748b;
-        margin-top: 18px;
-    }
-    .address-box {
-        background-color: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-left: 4px solid #3b82f6;
-        padding: 10px 14px;
-        border-radius: 8px;
-        font-size: 0.9rem;
-        color: #334155;
-        margin-top: 6px;
-        margin-bottom: 14px;
+        font-size: 0.78rem;
+        color: #94A3B8;
+        margin-top: 24px;
+        padding-bottom: 16px;
     }
     </style>
     """,
@@ -852,7 +936,6 @@ def _is_same_team_reference(team_cell, team_name):
     if not team_cell or team_cell == "nan" or team_cell == "none":
         return False
 
-    # Pencocokan persis secara utuh (Exact match) agar tidak tercampur
     if team_cell == team_name:
         return True
 
@@ -972,9 +1055,9 @@ def get_target_for_brand(brand, target_key, default_val):
 
 def style_status_target(val):
     if val == "Not Achieved":
-        return "color: #d32f2f; font-weight: bold;"
+        return "color: #DC2626; font-weight: 700;"
     elif val == "Achieved":
-        return "color: #16a34a; font-weight: bold;"
+        return "color: #16A34A; font-weight: 700;"
     return ""
 
 # ====================================================
@@ -1015,17 +1098,17 @@ if "draft_bumo" not in st.session_state:
     st.session_state["draft_bumo"] = ""
 
 # ====================================================
-# SIDEBAR ADMIN
+# SIDEBAR ADMIN (TERORGANISIR)
 # ====================================================
 if not st.session_state["logged_in"]:
     with st.sidebar:
-        st.markdown("### 🔐 Menu Admin / Supervisor")
-        st.markdown("Akses dashboard terpusat dan pengaturan master data.")
+        st.markdown("### 🔐 Panel Admin & Supervisor")
+        st.caption("Pusat kontrol data lapangan dan konfigurasi master.")
 
         if not st.session_state["admin_logged_in"]:
             with st.form("form_admin_login"):
-                pass_input = st.text_input("Password Admin", type="password")
-                btn_pass = st.form_submit_button("Buka Dashboard Admin")
+                pass_input = st.text_input("Kata Sandi Admin", type="password", placeholder="••••••••")
+                btn_pass = st.form_submit_button("Masuk Dashboard Admin", use_container_width=True)
 
                 if btn_pass:
                     if pass_input == "admin123":
@@ -1036,42 +1119,44 @@ if not st.session_state["logged_in"]:
                     else:
                         st.error("❌ Password salah!")
         else:
-            st.success("🟢 Status: Admin Aktif")
-            st.markdown("---")
+            st.success("🟢 Mode Admin Aktif")
 
-            if st.button("🏠 Dashboard Utama", use_container_width=True, type="primary"):
+            st.markdown("##### 📊 Monitoring & Laporan")
+            if st.button("🏠 Dashboard Utama", use_container_width=True, type="primary" if st.session_state["admin_view"] == "Dashboard" else "secondary"):
                 st.session_state["admin_view"] = "Dashboard"
                 st.rerun()
-            if st.button("🏷️ Master Nama Team (1 - 20)", use_container_width=True):
+            if st.button("📅 Entry & Jadwal SPG", use_container_width=True, type="primary" if st.session_state["admin_view"] == "Master_Jadwal_Excel" else "secondary"):
+                st.session_state["admin_view"] = "Master_Jadwal_Excel"
+                st.rerun()
+            if st.button("📈 Analitik Lapangan", use_container_width=True, type="primary" if st.session_state["admin_view"] == "Analitik" else "secondary"):
+                st.session_state["admin_view"] = "Analitik"
+                st.rerun()
+            if st.button("🗺️ Peta Rute & Poligon", use_container_width=True, type="primary" if st.session_state["admin_view"] == "Peta_Rute" else "secondary"):
+                st.session_state["admin_view"] = "Peta_Rute"
+                st.rerun()
+
+            st.markdown("##### ⚙️ Master Data")
+            if st.button("🏷️ Master Nama Team", use_container_width=True):
                 st.session_state["admin_view"] = "Master_Nama_Team"
                 st.rerun()
-            if st.button("👥 Master Team & Brand", use_container_width=True):
+            if st.button("👥 Team & Alokasi Brand", use_container_width=True):
                 st.session_state["admin_view"] = "Master_Team"
-                st.rerun()
-            if st.button("🚗 Master Plat Kendaraan", use_container_width=True):
-                st.session_state["admin_view"] = "Master_Plat"
                 st.rerun()
             if st.button("👩‍💼 Master Nama SPG", use_container_width=True):
                 st.session_state["admin_view"] = "Master_SPG"
                 st.rerun()
-            if st.button("🚬 Master Merek Rokok", use_container_width=True):
+            if st.button("🚬 Merek Rokok & Target", use_container_width=True):
                 st.session_state["admin_view"] = "Master_Brand"
                 st.rerun()
-            if st.button("📍 Master Lokasi Warkop (Excel)", use_container_width=True):
+            if st.button("🚗 Plat Kendaraan", use_container_width=True):
+                st.session_state["admin_view"] = "Master_Plat"
+                st.rerun()
+            if st.button("📍 Lokasi Warkop (Excel)", use_container_width=True):
                 st.session_state["admin_view"] = "Master_Lokasi"
-                st.rerun()
-            if st.button("📅 Entry & Monitoring Jadwal SPG", use_container_width=True):
-                st.session_state["admin_view"] = "Master_Jadwal_Excel"
-                st.rerun()
-            if st.button("📊 Analitik & Rekap All", use_container_width=True):
-                st.session_state["admin_view"] = "Analitik"
-                st.rerun()
-            if st.button("🗺️ Peta Rute All User", use_container_width=True):
-                st.session_state["admin_view"] = "Peta_Rute"
                 st.rerun()
 
             st.markdown("---")
-            if st.button("🔒 Keluar dari Mode Admin", use_container_width=True):
+            if st.button("🔒 Keluar Mode Admin", use_container_width=True):
                 st.session_state["admin_logged_in"] = False
                 st.rerun()
 
@@ -1090,7 +1175,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
         with st.form("form_edit_nama_team"):
             st.markdown("#### Edit Nama Team")
             updated_names = {}
-            
+
             for i in range(1, 21):
                 key = f"Team SPG {i}"
                 current_val = team_names_map.get(key, key)
@@ -1537,7 +1622,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                     "PathLayer",
                     data=[{"path": koordinat_rute, "name": "Rute Perjalanan"}],
                     get_path="path",
-                    get_color=[211, 47, 47, 220],
+                    get_color=[220, 38, 38, 220],
                     get_width=6,
                     pickable=True,
                 )
@@ -1564,7 +1649,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                             "<b>Warkop:</b> {Warkop_LKK} ({Kecamatan})<br/><b>Brand:</b> {Brand_Rokok} ({Jumlah_Bungkus} bks)<br/>"
                             "<b>Waktu:</b> {Waktu}"
                         ),
-                        "style": {"backgroundColor": "#1e293b", "color": "white"},
+                        "style": {"backgroundColor": "#0F172A", "color": "white"},
                     },
                 )
                 st.pydeck_chart(deck_map)
@@ -2152,123 +2237,120 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
 # HALAMAN LOGIN UTAMA
 # ====================================================
 if not st.session_state["logged_in"]:
-    _, col_center, _ = st.columns([0.02, 0.96, 0.02])
+    st.markdown(
+        """
+        <div class="login-header">
+            <div style="font-size: 2.2rem; margin-bottom: 4px;">📍</div>
+            <h1>PORTAL LAPORAN &amp; MONITORING</h1>
+            <p>Sistem Pelaporan Lapangan SPG &amp; Supervisi</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    with col_center:
-        st.markdown(
-            """
-            <div class="login-header">
-                <div style="font-size: 2.5rem; margin-bottom: 6px;">📍</div>
-                <h1>PORTAL LAPORAN &amp; MONITORING</h1>
-                <p>Silakan pilih mode masuk untuk SPG atau Supervisi Lapangan</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    st.markdown('<div class="section-title">1️⃣ Pilih Peran Masuk</div>', unsafe_allow_html=True)
+    col_btn_mode1, col_btn_mode2 = st.columns(2)
+    with col_btn_mode1:
+        if st.button(
+            "📝 Masuk sebagai SPG",
+            use_container_width=True,
+            type="primary" if st.session_state["login_mode"] == "SPG" else "secondary",
+        ):
+            st.session_state["login_mode"] = "SPG"
+            st.rerun()
+
+    with col_btn_mode2:
+        if st.button(
+            "👀 Masuk sebagai Supervisi",
+            use_container_width=True,
+            type="primary" if st.session_state["login_mode"] == "Supervisi" else "secondary",
+        ):
+            st.session_state["login_mode"] = "Supervisi"
+            st.rerun()
+
+    st.markdown('<div class="section-title">2️⃣ Pilih Tim &amp; Verifikasi Jadwal</div>', unsafe_allow_html=True)
+    with st.container(border=True):
+        team_name_mapping = load_master_team_names()
+        list_team = [
+            team_name_mapping[f"Team SPG {i}"]
+            for i in range(1, 21)
+            if team_name_mapping[f"Team SPG {i}"]
+        ]
+        if not list_team:
+            st.info("Belum ada nama team aktif. Admin perlu mengunggah jadwal SPG terlebih dahulu.")
+            st.stop()
+
+        pilihan_user = st.selectbox(
+            "👤 Nama Team Operasional",
+            list_team,
+            key="selected_team_login",
+            on_change=reset_session_on_user_change,
         )
 
-        st.markdown("#### 🚀 Pilih Mode Masuk & Identitas Operasional")
+        schedule_ok, schedule_warning_msg, auto_detected_kota, auto_kecamatan_list, matched_schedule_rows = get_schedule_info_for_team(pilihan_user)
+        scheduled_vehicles = []
+        if schedule_ok and st.session_state["login_mode"] == "Supervisi":
+            today_wib = (datetime.utcnow() + timedelta(hours=7)).date()
+            scheduled_vehicles = get_scheduled_vehicles(matched_schedule_rows, today_wib)
 
-        col_btn_mode1, col_btn_mode2 = st.columns(2)
-        with col_btn_mode1:
-            if st.button(
-                "📝 LOGIN SPG\n(Entry Laporan Konsumen)",
-                use_container_width=True,
-                type="primary" if st.session_state["login_mode"] == "SPG" else "secondary",
-            ):
-                st.session_state["login_mode"] = "SPG"
-                st.rerun()
-
-        with col_btn_mode2:
-            if st.button(
-                "👀 LOGIN SUPERVISI\n(Monitoring & Rekap)",
-                use_container_width=True,
-                type="primary" if st.session_state["login_mode"] == "Supervisi" else "secondary",
-            ):
-                st.session_state["login_mode"] = "Supervisi"
-                st.rerun()
-
-        st.markdown(f"**Mode Aktif Saat Ini:** `{st.session_state['login_mode']}`")
-        st.markdown("---")
-
-        with st.container():
-            team_name_mapping = load_master_team_names()
-            list_team = [
-                team_name_mapping[f"Team SPG {i}"]
-                for i in range(1, 21)
-                if team_name_mapping[f"Team SPG {i}"]
-            ]
-            if not list_team:
-                st.info("Belum ada nama team aktif. Admin perlu mengunggah jadwal SPG terlebih dahulu.")
-                st.stop()
-            pilihan_user = st.selectbox(
-                "👤 Pilih Nama Team",
-                list_team,
-                key="selected_team_login",
-                on_change=reset_session_on_user_change,
+        if not schedule_ok:
+            st.error("⚠️ **Tidak Ada Jadwal Team Tersebut Untuk Hari Ini**")
+        else:
+            st.success(
+                f"✅ **Jadwal Aktif Ditemukan**\n\n"
+                f"- **Wilayah:** {auto_detected_kota}\n"
+                f"- **Kecamatan:** {', '.join(auto_kecamatan_list) if auto_kecamatan_list else '-'}"
             )
-
-            schedule_ok, schedule_warning_msg, auto_detected_kota, auto_kecamatan_list, matched_schedule_rows = get_schedule_info_for_team(pilihan_user)
-            scheduled_vehicles = []
-            if schedule_ok and st.session_state["login_mode"] == "Supervisi":
-                today_wib = (datetime.utcnow() + timedelta(hours=7)).date()
-                scheduled_vehicles = get_scheduled_vehicles(matched_schedule_rows, today_wib)
-
-            if not schedule_ok:
-                st.error("⚠️ **Tidak Ada Jadwal Team Tersebut Untuk Hari Ini**")
-            else:
-                st.info(f"🏙️ Wilayah Terdeteksi dari Jadwal Hari Ini: **{auto_detected_kota}**")
-                st.caption(f"📌 Kecamatan yang diijinkan hari ini: {', '.join(auto_kecamatan_list) if auto_kecamatan_list else '-'}")
-                if st.session_state["login_mode"] == "Supervisi":
-                    if len(scheduled_vehicles) == 1:
-                        st.info(f"🚗 Plat kendaraan otomatis sesuai jadwal: **{scheduled_vehicles[0]}**")
-                    elif not scheduled_vehicles:
-                        st.warning("Plat kendaraan belum diatur pada jadwal team hari ini. Lengkapi plat di menu Entry & Monitoring Jadwal SPG.")
-                    else:
-                        st.error(
-                            "Jadwal team hari ini memiliki lebih dari satu plat kendaraan "
-                            f"({', '.join(scheduled_vehicles)}). Samakan plat pada jadwal sebelum login Supervisi."
-                        )
-
-            st.markdown("")
-            btn_login = st.button(f"Masuk Aplikasi ({st.session_state['login_mode']})", type="primary", use_container_width=True)
-
-            if btn_login:
-                if not schedule_ok:
-                    st.error("❌ Akses ditolak: Tidak Ada Jadwal Team Tersebut Untuk Hari Ini.")
-                elif st.session_state["login_mode"] == "Supervisi" and len(scheduled_vehicles) != 1:
-                    st.error("❌ Akses Supervisi ditolak: plat kendaraan pada jadwal belum tersedia atau tidak konsisten.")
+            if st.session_state["login_mode"] == "Supervisi":
+                if len(scheduled_vehicles) == 1:
+                    st.info(f"🚗 Plat Kendaraan Terjadwal: **{scheduled_vehicles[0]}**")
+                elif not scheduled_vehicles:
+                    st.warning("Plat kendaraan belum diatur pada jadwal team hari ini.")
                 else:
-                    st.session_state["logged_in"] = True
-                    st.session_state["user_spg"] = pilihan_user
-                    st.session_state["plat_mobil"] = scheduled_vehicles[0] if st.session_state["login_mode"] == "Supervisi" else "-"
-                    st.session_state["kota_kab"] = auto_detected_kota
-                    st.rerun()
+                    st.error(f"Terdapat lebih dari satu plat kendaraan ({', '.join(scheduled_vehicles)}). Samakan plat pada jadwal.")
 
-        st.markdown(
-            """
-            <div class="footer-note">
-                Gunakan sidebar kiri untuk masuk ke menu <b>Dashboard Admin</b>.<br/>
-                © 2026 Tumarso Monitoring System
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.markdown("")
+        btn_login = st.button(f"🚀 Lanjut Masuk ({st.session_state['login_mode']})", type="primary", use_container_width=True)
 
+        if btn_login:
+            if not schedule_ok:
+                st.error("❌ Akses ditolak: Tidak Ada Jadwal Team Tersebut Untuk Hari Ini.")
+            elif st.session_state["login_mode"] == "Supervisi" and len(scheduled_vehicles) != 1:
+                st.error("❌ Akses Supervisi ditolak: plat kendaraan pada jadwal belum tersedia atau tidak konsisten.")
+            else:
+                st.session_state["logged_in"] = True
+                st.session_state["user_spg"] = pilihan_user
+                st.session_state["plat_mobil"] = scheduled_vehicles[0] if st.session_state["login_mode"] == "Supervisi" else "-"
+                st.session_state["kota_kab"] = auto_detected_kota
+                st.rerun()
+
+    st.markdown(
+        """
+        <div class="footer-note">
+            Buka menu samping kiri (<b>&gt;</b>) untuk akses <b>Dashboard Admin</b><br/>
+            © 2026 Tumarso Monitoring System
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.stop()
 
 # ====================================================
 # APLIKASI UTAMA SETELAH LOGIN
 # ====================================================
-col_banner, col_logout = st.columns([0.78, 0.22])
+col_banner, col_logout = st.columns([0.8, 0.2])
 
 with col_banner:
-    mode_badge = "👀 Mode Supervisi" if st.session_state["login_mode"] == "Supervisi" else "📝 Mode SPG"
+    mode_badge = "👀 Supervisi" if st.session_state["login_mode"] == "Supervisi" else "📝 SPG"
     st.markdown(
         f"""
         <div class="user-banner">
-            <div class="user-banner-title">👤 {st.session_state['user_spg']} &nbsp;|&nbsp; <span style="font-size: 0.9rem; color: #38bdf8;">{mode_badge}</span></div>
+            <div class="user-banner-title">
+                <span>👤 {st.session_state['user_spg']}</span>
+                <span class="badge-mode">{mode_badge}</span>
+            </div>
             <div class="user-banner-sub">
-                🚗 Plat Mobil: <b>{st.session_state['plat_mobil']}</b> &nbsp;|&nbsp; 🏙️ Wilayah: <b>{st.session_state['kota_kab']}</b>
+                🚗 Plat: <b>{st.session_state['plat_mobil']}</b> &nbsp;•&nbsp; 🏙️ Wilayah: <b>{st.session_state['kota_kab']}</b>
             </div>
         </div>
         """,
@@ -2276,12 +2358,10 @@ with col_banner:
     )
 
 with col_logout:
-    st.write("")
+    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
     if st.button("🚪 Keluar", use_container_width=True):
         st.session_state["logged_in"] = False
         st.rerun()
-
-st.markdown("---")
 
 gdf_wilayah = load_master_wilayah(st.session_state["kota_kab"])
 
@@ -2327,10 +2407,8 @@ else:
 is_inside_geofence = True
 
 if is_inside_geofence:
-    info_kec_gps = f"Kecamatan **{detected_kecamatan}**" if detected_kecamatan else "Wilayah Terdeteksi"
     st.success(
-        f"📍 **Status GPS (Aktif):** Lat: `{user_lat:.6f}`, Lon: `{user_lon:.6f}` "
-        f"(Akurasi: ±{akurasi_meter}m) — **{st.session_state['kota_kab']}**"
+        f"📍 **GPS Aktif:** `{user_lat:.6f}`, `{user_lon:.6f}` (±{akurasi_meter}m) — **{st.session_state['kota_kab']}**"
     )
 else:
     st.warning(
@@ -2348,60 +2426,60 @@ if not schedule_ok:
 else:
     daftar_kecamatan_terjadwal = sorted(set(daftar_kecamatan_terjadwal))
 
-st.markdown("### 📋 Lokasi Kunjungan Lapangan")
+st.markdown('<div class="section-title">📍 Titik Kunjungan Lapangan</div>', unsafe_allow_html=True)
+with st.container(border=True):
+    kecamatan_pilihan = st.selectbox(
+        f"Kecamatan Tujuan ({st.session_state['kota_kab']})",
+        options=daftar_kecamatan_terjadwal,
+        help="Kecamatan difilter otomatis sesuai penugasan jadwal hari ini yang dikelola di menu admin.",
+    )
 
-kecamatan_pilihan = st.selectbox(
-    f"Pilih Kecamatan Tujuan Kunjungan Berdasarkan Jadwal ({st.session_state['kota_kab']})",
-    options=daftar_kecamatan_terjadwal,
-    help="Kecamatan difilter otomatis sesuai penugasan jadwal hari ini yang dikelola di menu admin.",
-)
+    df_master_excel = load_master_lokasi_excel()
+    filtered_df_warkop = pd.DataFrame()
 
-df_master_excel = load_master_lokasi_excel()
-filtered_df_warkop = pd.DataFrame()
+    if not df_master_excel.empty:
+        col_kec_excel = next((c for c in df_master_excel.columns if "kec" in c.lower() or "wilayah" in c.lower()), None)
+        col_warkop_excel = next((c for c in df_master_excel.columns if "warkop" in c.lower() or "lkk" in c.lower() or "nama" in c.lower()), None)
+        col_alamat_excel = next((c for c in df_master_excel.columns if "alamat" in c.lower() or "address" in c.lower()), None)
 
-if not df_master_excel.empty:
-    col_kec_excel = next((c for c in df_master_excel.columns if "kec" in c.lower() or "wilayah" in c.lower()), None)
-    col_warkop_excel = next((c for c in df_master_excel.columns if "warkop" in c.lower() or "lkk" in c.lower() or "nama" in c.lower()), None)
-    col_alamat_excel = next((c for c in df_master_excel.columns if "alamat" in c.lower() or "address" in c.lower()), None)
+        if col_kec_excel and col_warkop_excel:
+            mask = (
+                df_master_excel[col_kec_excel].astype(str).str.strip().str.lower()
+                == str(kecamatan_pilihan).strip().lower()
+            )
+            filtered_df_warkop = df_master_excel[mask]
+            if filtered_df_warkop.empty:
+                filtered_df_warkop = df_master_excel.copy()
 
-    if col_kec_excel and col_warkop_excel:
-        mask = (
-            df_master_excel[col_kec_excel].astype(str).str.strip().str.lower()
-            == str(kecamatan_pilihan).strip().lower()
-        )
-        filtered_df_warkop = df_master_excel[mask]
-        if filtered_df_warkop.empty:
-            filtered_df_warkop = df_master_excel.copy()
-
-    if not filtered_df_warkop.empty and col_warkop_excel:
-        filtered_warkop_list = filtered_df_warkop[col_warkop_excel].dropna().unique().tolist()
+        if not filtered_df_warkop.empty and col_warkop_excel:
+            filtered_warkop_list = filtered_df_warkop[col_warkop_excel].dropna().unique().tolist()
+        else:
+            filtered_warkop_list = ["Warkop Alternatif 1", "Warkop Alternatif 2"]
     else:
         filtered_warkop_list = ["Warkop Alternatif 1", "Warkop Alternatif 2"]
-else:
-    filtered_warkop_list = ["Warkop Alternatif 1", "Warkop Alternatif 2"]
 
-if not filtered_warkop_list:
-    filtered_warkop_list = ["Warkop Alternatif 1", "Warkop Alternatif 2"]
+    if not filtered_warkop_list:
+        filtered_warkop_list = ["Warkop Alternatif 1", "Warkop Alternatif 2"]
 
-nama_warkop_manual = st.selectbox(
-    f"Pilih Warkop / LKK (Titik Wajib Kunjung) di {kecamatan_pilihan}",
-    options=filtered_warkop_list,
-    help="Daftar warkop difilter otomatis dari Master WarkopLKK.xlsx",
-)
+    nama_warkop_manual = st.selectbox(
+        f"Warkop / LKK di {kecamatan_pilihan}",
+        options=filtered_warkop_list,
+        help="Daftar warkop difilter otomatis dari Master WarkopLKK.xlsx",
+    )
 
-alamat_warkop_terpilih = "-"
-if not df_master_excel.empty and col_warkop_excel and col_alamat_excel:
-    match_row = df_master_excel[
-        df_master_excel[col_warkop_excel].astype(str).str.strip() == str(nama_warkop_manual).strip()
-    ]
-    if not match_row.empty:
-        alamat_warkop_terpilih = str(match_row.iloc[0][col_alamat_excel])
+    alamat_warkop_terpilih = "-"
+    if not df_master_excel.empty and col_warkop_excel and col_alamat_excel:
+        match_row = df_master_excel[
+            df_master_excel[col_warkop_excel].astype(str).str.strip() == str(nama_warkop_manual).strip()
+        ]
+        if not match_row.empty:
+            alamat_warkop_terpilih = str(match_row.iloc[0][col_alamat_excel])
 
-st.markdown(f"""
-<div class="address-box">
-    📍 <b>Alamat Warkop / LKK Wajib Kunjung:</b> {alamat_warkop_terpilih}
-</div>
-""", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="address-box">
+        📍 <b>Alamat:</b> {alamat_warkop_terpilih}
+    </div>
+    """, unsafe_allow_html=True)
 
 # ====================================================
 # MODE SUPERVISI
@@ -2474,7 +2552,7 @@ if st.session_state["login_mode"] == "Supervisi":
         st.markdown(f'<div class="dashboard-card"><div class="card-value">{total_omset_lkk:,} bks</div><div class="card-label">Omset LKK Ini</div></div>', unsafe_allow_html=True)
     with col_mon4:
         spg_list_str = ", ".join(df_lkk_active_spg["Nama_SPG"].dropna().unique().tolist()) if not df_lkk_active_spg.empty else "Belum ada SPG"
-        st.markdown(f'<div class="dashboard-card"><div class="card-value" style="font-size: 1.1rem; padding-top: 6px;">{spg_list_str}</div><div class="card-label">SPG Bertugas</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="dashboard-card"><div class="card-value" style="font-size: 1.05rem; padding-top: 6px;">{spg_list_str}</div><div class="card-label">SPG Bertugas</div></div>', unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown(f"#### 📊 Rekapitulasi Combine Per Titik LKK ({st.session_state['user_spg']})")
@@ -2536,42 +2614,58 @@ if st.session_state["login_mode"] == "Supervisi":
 # ====================================================
 daftar_master_spg = load_master_spgs()
 if daftar_master_spg:
-    nama_spg_manual = st.selectbox("Pilih Nama SPG yang Bertugas", options=daftar_master_spg)
+    nama_spg_manual = st.selectbox("👩‍💼 Pilih Nama SPG yang Bertugas", options=daftar_master_spg)
 else:
-    nama_spg_manual = st.text_input("Nama SPG (Entry Manual)", placeholder="Contoh: Nanda")
+    nama_spg_manual = st.text_input("👩‍💼 Nama SPG (Entry Manual)", placeholder="Contoh: Nanda")
 
 if is_inside_geofence and str(nama_spg_manual).strip() != "" and str(nama_warkop_manual).strip() != "":
-    st.success(f"✅ Form laporan untuk **{str(nama_spg_manual).strip()}** di **Kecamatan {kecamatan_pilihan}** ({nama_warkop_manual}) siap diisi.")
-    st.markdown("---")
+    st.success(f"✅ Form siap diisi untuk **{str(nama_spg_manual).strip()}** di **{nama_warkop_manual}**")
 
     with st.form("form_laporan_spg"):
-        st.markdown("### 📝 Form Input Laporan Konsumen &nbsp; `💾 Dilengkapi Auto-Draft`")
-        st.write(f"**Team Login:** {st.session_state['user_spg']} | **Nama SPG:** {str(nama_spg_manual).strip()} | **Warkop/LKK:** {str(nama_warkop_manual).strip()}")
+        st.markdown("### 📝 Form Input Laporan Konsumen")
+        st.caption(f"Team: **{st.session_state['user_spg']}** • SPG: **{str(nama_spg_manual).strip()}** • Titik: **{str(nama_warkop_manual).strip()}**")
 
         team_brands_map = load_master_team_brands()
         allowed_brands_for_team = team_brands_map.get(st.session_state["user_spg"], load_master_brands())
         if not allowed_brands_for_team:
             allowed_brands_for_team = load_master_brands()
 
-        brand_entry = st.selectbox(
-            f"Brand Rokok (Dikhususkan untuk {st.session_state['user_spg']})",
-            options=allowed_brands_for_team,
-            help="Daftar merek rokok disesuaikan dengan alokasi Master Team Admin",
-        )
+        col_f1, col_f2 = st.columns([1.3, 0.7])
+        with col_f1:
+            brand_entry = st.selectbox(
+                "🚬 Brand Rokok",
+                options=allowed_brands_for_team,
+                help="Daftar merek rokok disesuaikan dengan alokasi Master Team Admin",
+            )
+        with col_f2:
+            jumlah_bungkus = st.number_input(
+                "📦 Jumlah Bungkus",
+                min_value=1,
+                step=1,
+                value=st.session_state["draft_bungkus"],
+            )
 
-        nama_konsumen = st.text_input("Nama Konsumen", value=st.session_state["draft_konsumen"], placeholder="Masukkan nama konsumen")
-        gender_entry = st.radio("Gender", ["L", "P"], horizontal=True)
-        range_umur_entry = st.selectbox("Range Umur", options=["18-24", "25-30", "31-35", "36-44", "45+"], help="Pilih rentang usia konsumen")
-        nohp_entry = st.text_input("No HP", value=st.session_state["draft_nohp"], placeholder="Contoh: 081234567890")
-        instagram_input = st.text_input("Instagram", value=st.session_state["draft_ig"], placeholder="username_ig")
-        jumlah_bungkus = st.number_input("Jumlah Bungkus", min_value=1, step=1, value=st.session_state["draft_bungkus"])
-        rokok_asal_bumo = st.text_input("Rokok Asal (BUMO)", value=st.session_state["draft_bumo"], placeholder="Merk rokok yang biasa dikonsumsi sebelumnya")
+        nama_konsumen = st.text_input("👤 Nama Konsumen", value=st.session_state["draft_konsumen"], placeholder="Masukkan nama konsumen")
+
+        col_g1, col_g2 = st.columns(2)
+        with col_g1:
+            gender_entry = st.radio("⚧️ Gender", ["L", "P"], horizontal=True)
+        with col_g2:
+            range_umur_entry = st.selectbox("🎂 Range Umur", options=["18-24", "25-30", "31-35", "36-44", "45+"])
+
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            nohp_entry = st.text_input("📱 No HP", value=st.session_state["draft_nohp"], placeholder="081234567890")
+        with col_c2:
+            instagram_input = st.text_input("📸 Instagram", value=st.session_state["draft_ig"], placeholder="username_ig")
+
+        rokok_asal_bumo = st.text_input("🔄 Rokok Asal (BUMO)", value=st.session_state["draft_bumo"], placeholder="Merk rokok yang biasa dikonsumsi sebelumnya")
 
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
-            btn_save_draft = st.form_submit_button("💾 Simpan Draft Saja", type="secondary")
+            btn_save_draft = st.form_submit_button("💾 Simpan Draft", type="secondary", use_container_width=True)
         with col_btn2:
-            btn_kirim = st.form_submit_button("🚀 Kirim Laporan ke Database", type="primary")
+            btn_kirim = st.form_submit_button("🚀 Kirim Laporan", type="primary", use_container_width=True)
 
         if btn_save_draft:
             st.session_state["draft_konsumen"] = nama_konsumen
@@ -2579,7 +2673,7 @@ if is_inside_geofence and str(nama_spg_manual).strip() != "" and str(nama_warkop
             st.session_state["draft_ig"] = instagram_input
             st.session_state["draft_bungkus"] = jumlah_bungkus
             st.session_state["draft_bumo"] = rokok_asal_bumo
-            st.info("💾 Draft laporan berhasil diamankan ke memori sesi sementara! (Aman jika HP sempat tidur sejenak).")
+            st.info("💾 Draft laporan berhasil diamankan ke memori sesi sementara!")
 
         if btn_kirim:
             if not nama_konsumen.strip():
