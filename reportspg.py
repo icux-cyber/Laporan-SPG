@@ -27,478 +27,231 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# ====================================================
+# CUSTOM CSS UNTUK UI MODERN & MOBILE-FRIENDLY
+# ====================================================
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
-def get_team_theme(team_name: str, is_supervisi: bool = False) -> dict:
-    name_low = str(team_name or "").strip().casefold()
+    html, body, [class*="css"] {
+        font-family: 'Plus Jakarta Sans', sans-serif;
+    }
 
-    if "matcha" in name_low:
-        theme = {
-            "key": "matcha",
-            "label": "Tema Matcha (Hitam & Hijau Menyala)",
-            "app_bg": "#090D0A",
-            "surface_bg": "#111812",
-            "surface_elevated": "#172118",
-            "border": "#224229",
-            "text_primary": "#4ADE80",
-            "text_secondary": "#86EFAC",
-            "text_muted": "#4B8B5E",
-            "accent": "#22C55E",
-            "accent_strong": "#16A34A",
-            "accent_contrast": "#052E16",
-            "banner_bg": "linear-gradient(135deg, #070B08 0%, #132A18 100%)",
-            "banner_border": "#4ADE80",
-            "address_bg": "#0F2214",
-            "address_border": "#22C55E",
-            "address_text": "#86EFAC",
-            "input_bg": "#121B14",
-            "glow": "0 0 18px rgba(74, 222, 128, 0.22)",
-        }
-    elif "super" in name_low:
-        theme = {
-            "key": "super",
-            "label": "Tema Super (Merah Dominan & Emas)",
-            "app_bg": "#7F1D1D",
-            "surface_bg": "#991B1B",
-            "surface_elevated": "#B91C1C",
-            "border": "#FBBF24",
-            "text_primary": "#FDE047",
-            "text_secondary": "#FACC15",
-            "text_muted": "#FDE68A",
-            "accent": "#F59E0B",
-            "accent_strong": "#D97706",
-            "accent_contrast": "#450A0A",
-            "banner_bg": "linear-gradient(135deg, #450A0A 0%, #991B1B 100%)",
-            "banner_border": "#FACC15",
-            "address_bg": "#6B1414",
-            "address_border": "#FACC15",
-            "address_text": "#FDE047",
-            "input_bg": "#691515",
-            "glow": "0 0 18px rgba(250, 204, 21, 0.25)",
-        }
-    elif "aksara" in name_low or "akasar" in name_low:
-        theme = {
-            "key": "aksara",
-            "label": "Tema Aksara (Hitam & Emas)",
-            "app_bg": "#09090B",
-            "surface_bg": "#141310",
-            "surface_elevated": "#1D1A12",
-            "border": "#5C4914",
-            "text_primary": "#FACC15",
-            "text_secondary": "#FDE047",
-            "text_muted": "#CA9A26",
-            "accent": "#EAB308",
-            "accent_strong": "#CA8A04",
-            "accent_contrast": "#181404",
-            "banner_bg": "linear-gradient(135deg, #09090B 0%, #27200B 100%)",
-            "banner_border": "#FACC15",
-            "address_bg": "#1B1609",
-            "address_border": "#FACC15",
-            "address_text": "#FDE047",
-            "input_bg": "#14120C",
-            "glow": "0 0 18px rgba(250, 204, 21, 0.22)",
-        }
-    elif "apel" in name_low:
-        theme = {
-            "key": "apel",
-            "label": "Tema Apel (Oranye Dominan & Merah Menyala)",
-            "app_bg": "#EA580C",
-            "surface_bg": "#F97316",
-            "surface_elevated": "#FB923C",
-            "border": "#FF2A2A",
-            "text_primary": "#FF1E1E",
-            "text_secondary": "#FF4D4D",
-            "text_muted": "#FFF7ED",
-            "accent": "#FF1E1E",
-            "accent_strong": "#DC2626",
-            "accent_contrast": "#FFF7ED",
-            "banner_bg": "linear-gradient(135deg, #9A3412 0%, #EA580C 100%)",
-            "banner_border": "#FF1E1E",
-            "address_bg": "#C2410C",
-            "address_border": "#FF1E1E",
-            "address_text": "#FF2E2E",
-            "input_bg": "#C2410C",
-            "glow": "0 0 18px rgba(255, 30, 30, 0.28)",
-        }
-    else:
-        theme = {
-            "key": "default",
-            "label": "Tema Standar",
-            "app_bg": "#F8FAFC",
-            "surface_bg": "#FFFFFF",
-            "surface_elevated": "#F1F5F9",
-            "border": "#E2E8F0",
-            "text_primary": "#0F172A",
-            "text_secondary": "#334155",
-            "text_muted": "#64748B",
-            "accent": "#DC2626",
-            "accent_strong": "#B91C1C",
-            "accent_contrast": "#FFFFFF",
-            "banner_bg": "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)",
-            "banner_border": "#DC2626",
-            "address_bg": "#EFF6FF",
-            "address_border": "#2563EB",
-            "address_text": "#1E3A8A",
-            "input_bg": "#FFFFFF",
-            "glow": "0 4px 12px rgba(15, 23, 42, 0.06)",
-        }
+    /* Background Utama */
+    .stApp {
+        background-color: #F8FAFC;
+        color: #1E293B;
+    }
 
-    theme["mode_badge_bg"] = "rgba(255, 255, 255, 0.14)" if is_supervisi else "rgba(255, 255, 255, 0.10)"
-    theme["mode_badge_text"] = theme["text_primary"] if is_supervisi else theme["text_secondary"]
-    return theme
+    /* Header Login */
+    .login-header {
+        background: linear-gradient(135deg, #DC2626 0%, #991B1B 100%);
+        padding: 32px 24px;
+        border-radius: 20px;
+        color: white;
+        text-align: center;
+        box-shadow: 0 12px 28px -6px rgba(220, 38, 38, 0.35);
+        margin-bottom: 24px;
+        position: relative;
+        overflow: hidden;
+    }
+    .login-header h1 {
+        margin: 0;
+        font-size: 1.65rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+    }
+    .login-header p {
+        margin: 6px 0 0 0;
+        font-size: 0.9rem;
+        color: #FEE2E2;
+        font-weight: 500;
+    }
 
+    /* Styling Container / Card */
+    .ui-card {
+        background-color: #FFFFFF;
+        padding: 22px;
+        border-radius: 16px;
+        border: 1px solid #E2E8F0;
+        box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.04);
+        margin-bottom: 16px;
+    }
 
-def apply_custom_css(theme: dict | None = None):
-    if not theme:
-        st.markdown(
-            """
-            <style>
-            @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+    /* Form Styling */
+    [data-testid="stForm"] {
+        background-color: #FFFFFF;
+        padding: 24px 20px;
+        border-radius: 18px;
+        border: 1px solid #E2E8F0;
+        box-shadow: 0 8px 20px -4px rgba(15, 23, 42, 0.05);
+    }
 
-            html, body, [class*="css"] {
-                font-family: 'Plus Jakarta Sans', sans-serif;
-            }
+    /* Tombol Utama & Submit */
+    [data-testid="stFormSubmitButton"] > button,
+    div.stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%) !important;
+        color: #FFFFFF !important;
+        font-weight: 700 !important;
+        font-size: 0.95rem !important;
+        padding: 0.65rem 1.2rem !important;
+        border-radius: 12px !important;
+        border: none !important;
+        box-shadow: 0 4px 12px rgba(220, 38, 38, 0.25) !important;
+        transition: all 0.2s ease !important;
+    }
+    [data-testid="stFormSubmitButton"] > button:hover,
+    div.stButton > button[kind="primary"]:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 16px rgba(220, 38, 38, 0.35) !important;
+    }
 
-            .stApp {
-                background-color: #F8FAFC;
-                color: #1E293B;
-            }
+    /* Tombol Sekunder */
+    div.stButton > button[kind="secondary"] {
+        background-color: #FFFFFF !important;
+        color: #334155 !important;
+        font-weight: 600 !important;
+        border: 1px solid #CBD5E1 !important;
+        border-radius: 12px !important;
+        padding: 0.6rem 1rem !important;
+        transition: all 0.2s ease !important;
+    }
+    div.stButton > button[kind="secondary"]:hover {
+        border-color: #94A3B8 !important;
+        background-color: #F1F5F9 !important;
+    }
 
-            .login-header {
-                background: linear-gradient(135deg, #DC2626 0%, #991B1B 100%);
-                padding: 32px 24px;
-                border-radius: 20px;
-                color: white;
-                text-align: center;
-                box-shadow: 0 12px 28px -6px rgba(220, 38, 38, 0.35);
-                margin-bottom: 24px;
-            }
-            .login-header h1 {
-                margin: 0;
-                font-size: 1.65rem;
-                font-weight: 800;
-                letter-spacing: -0.02em;
-            }
-            .login-header p {
-                margin: 6px 0 0 0;
-                font-size: 0.9rem;
-                color: #FEE2E2;
-                font-weight: 500;
-            }
+    /* Input Fields */
+    .stTextInput input, .stNumberInput input, .stSelectbox div[data-baseweb="select"] > div {
+        border-radius: 10px !important;
+        border-color: #CBD5E1 !important;
+    }
 
-            [data-testid="stForm"] {
-                background-color: #FFFFFF;
-                padding: 24px 20px;
-                border-radius: 18px;
-                border: 1px solid #E2E8F0;
-                box-shadow: 0 8px 20px -4px rgba(15, 23, 42, 0.05);
-            }
+    /* User Banner setelah Login */
+    .user-banner {
+        background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+        color: #F8FAFC;
+        padding: 18px 20px;
+        border-radius: 16px;
+        margin-bottom: 16px;
+        box-shadow: 0 8px 20px -4px rgba(15, 23, 42, 0.2);
+        border-left: 5px solid #DC2626;
+    }
+    .user-banner-title {
+        font-size: 1.1rem;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+    }
+    .badge-mode {
+        background-color: rgba(56, 189, 248, 0.15);
+        color: #38BDF8;
+        padding: 3px 10px;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    .user-banner-sub {
+        font-size: 0.85rem;
+        color: #CBD5E1;
+    }
 
-            [data-testid="stFormSubmitButton"] > button,
-            div.stButton > button[kind="primary"] {
-                background: linear-gradient(135deg, #DC2626 0%, #B91C1C 100%) !important;
-                color: #FFFFFF !important;
-                font-weight: 700 !important;
-                font-size: 0.95rem !important;
-                padding: 0.65rem 1.2rem !important;
-                border-radius: 12px !important;
-                border: none !important;
-                box-shadow: 0 4px 12px rgba(220, 38, 38, 0.25) !important;
-            }
+    /* KPI Dashboard Card */
+    .dashboard-card {
+        background-color: #FFFFFF;
+        border: 1px solid #E2E8F0;
+        padding: 18px;
+        border-radius: 16px;
+        box-shadow: 0 4px 10px -2px rgba(15, 23, 42, 0.04);
+        margin-bottom: 12px;
+        min-height: 138px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        transition: transform 0.2s ease;
+    }
+    .dashboard-card:hover {
+        transform: translateY(-2px);
+        border-color: #CBD5E1;
+    }
+    .card-value {
+        font-size: 1.75rem;
+        font-weight: 800;
+        color: #0F172A;
+        line-height: 1.15;
+    }
+    .card-value-green {
+        font-size: 1.75rem;
+        font-weight: 800;
+        color: #16A34A;
+        line-height: 1.15;
+    }
+    .card-subtext {
+        font-size: 0.8rem;
+        color: #64748B;
+        margin-top: 4px;
+    }
+    .card-label {
+        font-size: 0.88rem;
+        color: #475569;
+        font-weight: 600;
+        margin-top: 8px;
+    }
 
-            div.stButton > button[kind="secondary"] {
-                background-color: #FFFFFF !important;
-                color: #334155 !important;
-                font-weight: 600 !important;
-                border: 1px solid #CBD5E1 !important;
-                border-radius: 12px !important;
-                padding: 0.6rem 1rem !important;
-            }
+    /* Progress Bar */
+    .progress-bar-container {
+        width: 100%;
+        background-color: #E2E8F0;
+        border-radius: 999px;
+        height: 8px;
+        margin: 10px 0 4px 0;
+        overflow: hidden;
+    }
+    .progress-bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #16A34A 0%, #22C55E 100%);
+        border-radius: 999px;
+    }
 
-            .stTextInput input, .stNumberInput input, .stSelectbox div[data-baseweb="select"] > div {
-                border-radius: 10px !important;
-                border-color: #CBD5E1 !important;
-            }
+    /* Box Alamat Warkop */
+    .address-box {
+        background-color: #EFF6FF;
+        border: 1px solid #BFDBFE;
+        border-left: 4px solid #2563EB;
+        padding: 12px 16px;
+        border-radius: 12px;
+        font-size: 0.88rem;
+        color: #1E3A8A;
+        margin-top: 8px;
+        margin-bottom: 16px;
+    }
 
-            .user-banner {
-                background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
-                color: #F8FAFC;
-                padding: 18px 20px;
-                border-radius: 16px;
-                margin-bottom: 16px;
-                box-shadow: 0 8px 20px -4px rgba(15, 23, 42, 0.2);
-                border-left: 5px solid #DC2626;
-            }
-            .user-banner-title {
-                font-size: 1.1rem;
-                font-weight: 700;
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                margin-bottom: 6px;
-            }
-            .badge-mode {
-                background-color: rgba(56, 189, 248, 0.15);
-                color: #38BDF8;
-                padding: 3px 10px;
-                border-radius: 999px;
-                font-size: 0.8rem;
-                font-weight: 600;
-            }
-            .user-banner-sub {
-                font-size: 0.85rem;
-                color: #CBD5E1;
-            }
+    /* Section Title Pill */
+    .section-title {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: #0F172A;
+        margin: 18px 0 10px 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
 
-            .dashboard-card {
-                background-color: #FFFFFF;
-                border: 1px solid #E2E8F0;
-                padding: 18px;
-                border-radius: 16px;
-                box-shadow: 0 4px 10px -2px rgba(15, 23, 42, 0.04);
-                margin-bottom: 12px;
-                min-height: 138px;
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-            }
-            .card-value, .card-value-green {
-                font-size: 1.75rem;
-                font-weight: 800;
-                color: #0F172A;
-                line-height: 1.15;
-            }
-            .card-label {
-                font-size: 0.88rem;
-                color: #475569;
-                font-weight: 600;
-                margin-top: 8px;
-            }
-
-            .address-box {
-                background-color: #EFF6FF;
-                border: 1px solid #BFDBFE;
-                border-left: 4px solid #2563EB;
-                padding: 12px 16px;
-                border-radius: 12px;
-                font-size: 0.88rem;
-                color: #1E3A8A;
-                margin-top: 8px;
-                margin-bottom: 16px;
-            }
-
-            .section-title {
-                font-size: 1.05rem;
-                font-weight: 700;
-                color: #0F172A;
-                margin: 18px 0 10px 0;
-                display: flex;
-                align-items: center;
-                gap: 8px;
-            }
-
-            .footer-note {
-                text-align: center;
-                font-size: 0.78rem;
-                color: #94A3B8;
-                margin-top: 24px;
-                padding-bottom: 16px;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-        return
-
-    st.markdown(
-        f"""
-        <style>
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
-
-        html, body, [class*="css"] {{
-            font-family: 'Plus Jakarta Sans', sans-serif;
-        }}
-
-        .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {{
-            background: {theme['app_bg']} !important;
-            color: {theme['text_primary']} !important;
-        }}
-
-        [data-testid="stAppViewContainer"] p,
-        [data-testid="stAppViewContainer"] span,
-        [data-testid="stAppViewContainer"] label,
-        [data-testid="stAppViewContainer"] h1,
-        [data-testid="stAppViewContainer"] h2,
-        [data-testid="stAppViewContainer"] h3,
-        [data-testid="stAppViewContainer"] h4,
-        [data-testid="stAppViewContainer"] .stMarkdown,
-        [data-testid="stAppViewContainer"] .stCaption {{
-            color: {theme['text_primary']} !important;
-        }}
-
-        [data-testid="stContainer"][data-testid="stVerticalBlockBorderWrapper"] {{
-            background-color: {theme['surface_bg']} !important;
-            border: 1.5px solid {theme['border']} !important;
-            border-radius: 18px !important;
-            box-shadow: {theme['glow']} !important;
-        }}
-
-        [data-testid="stForm"] {{
-            background-color: {theme['surface_bg']} !important;
-            padding: 24px 20px;
-            border-radius: 18px;
-            border: 1.5px solid {theme['border']} !important;
-            box-shadow: {theme['glow']} !important;
-        }}
-
-        [data-testid="stFormSubmitButton"] > button,
-        div.stButton > button[kind="primary"] {{
-            background: linear-gradient(135deg, {theme['accent']} 0%, {theme['accent_strong']} 100%) !important;
-            color: {theme['accent_contrast']} !important;
-            font-weight: 800 !important;
-            font-size: 0.95rem !important;
-            padding: 0.65rem 1.2rem !important;
-            border-radius: 12px !important;
-            border: 1px solid {theme['border']} !important;
-            box-shadow: {theme['glow']} !important;
-            transition: all 0.2s ease !important;
-        }}
-        [data-testid="stFormSubmitButton"] > button:hover,
-        div.stButton > button[kind="primary"]:hover {{
-            transform: translateY(-2px) !important;
-        }}
-
-        div.stButton > button[kind="secondary"] {{
-            background-color: {theme['surface_elevated']} !important;
-            color: {theme['text_primary']} !important;
-            font-weight: 700 !important;
-            border: 1px solid {theme['border']} !important;
-            border-radius: 12px !important;
-            padding: 0.6rem 1rem !important;
-            transition: all 0.2s ease !important;
-        }}
-
-        .stTextInput input,
-        .stNumberInput input,
-        .stSelectbox div[data-baseweb="select"] > div,
-        .stMultiSelect div[data-baseweb="select"] > div {{
-            background-color: {theme['input_bg']} !important;
-            color: {theme['text_primary']} !important;
-            border-radius: 10px !important;
-            border-color: {theme['border']} !important;
-        }}
-
-        .stRadio div[role="radiogroup"] label,
-        .stRadio div[role="radiogroup"] p {{
-            color: {theme['text_primary']} !important;
-            font-weight: 600 !important;
-        }}
-
-        .user-banner {{
-            background: {theme['banner_bg']};
-            color: {theme['text_primary']} !important;
-            padding: 18px 20px;
-            border-radius: 16px;
-            margin-bottom: 16px;
-            box-shadow: {theme['glow']};
-            border: 1px solid {theme['border']};
-            border-left: 6px solid {theme['banner_border']};
-        }}
-        .user-banner-title {{
-            font-size: 1.15rem;
-            font-weight: 800;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 6px;
-            color: {theme['text_primary']} !important;
-        }}
-        .badge-mode {{
-            background-color: {theme['mode_badge_bg']};
-            color: {theme['mode_badge_text']} !important;
-            padding: 3px 10px;
-            border-radius: 999px;
-            font-size: 0.8rem;
-            font-weight: 700;
-            border: 1px solid {theme['border']};
-        }}
-        .user-banner-sub {{
-            font-size: 0.86rem;
-            color: {theme['text_secondary']} !important;
-        }}
-
-        .dashboard-card {{
-            background-color: {theme['surface_bg']} !important;
-            border: 1.5px solid {theme['border']} !important;
-            padding: 18px;
-            border-radius: 16px;
-            box-shadow: {theme['glow']};
-            margin-bottom: 12px;
-            min-height: 138px;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            transition: transform 0.2s ease;
-        }}
-        .dashboard-card:hover {{
-            transform: translateY(-2px);
-        }}
-        .card-value, .card-value-green {{
-            font-size: 1.65rem;
-            font-weight: 800;
-            color: {theme['text_primary']} !important;
-            line-height: 1.15;
-        }}
-        .card-label {{
-            font-size: 0.88rem;
-            color: {theme['text_secondary']} !important;
-            font-weight: 700;
-            margin-top: 8px;
-        }}
-
-        .address-box {{
-            background-color: {theme['address_bg']} !important;
-            border: 1px solid {theme['border']};
-            border-left: 5px solid {theme['address_border']} !important;
-            padding: 12px 16px;
-            border-radius: 12px;
-            font-size: 0.88rem;
-            color: {theme['address_text']} !important;
-            margin-top: 8px;
-            margin-bottom: 16px;
-        }}
-        .address-box b, .address-box span {{
-            color: {theme['address_text']} !important;
-        }}
-
-        .section-title {{
-            font-size: 1.08rem;
-            font-weight: 800;
-            color: {theme['text_primary']} !important;
-            margin: 18px 0 10px 0;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            text-shadow: {theme['glow']};
-        }}
-
-        .theme-pill {{
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 999px;
-            font-size: 0.78rem;
-            font-weight: 700;
-            background-color: {theme['surface_elevated']};
-            color: {theme['text_primary']} !important;
-            border: 1px solid {theme['border']};
-            margin-bottom: 10px;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-apply_custom_css()
+    .footer-note {
+        text-align: center;
+        font-size: 0.78rem;
+        color: #94A3B8;
+        margin-top: 24px;
+        padding-bottom: 16px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ====================================================
 # DEFINISI FILE DATABASE LOKAL & KONFIGURASI GOOGLE SHEET
@@ -987,6 +740,10 @@ def save_supervisi_database(df):
 
 
 def get_active_spg_points_today(team_name: str, fallback_kota: str = "", fallback_kec: str = "") -> list[dict]:
+    """
+    Mengambil daftar titik unik (Warkop_LKK) yang sudah diinput SPG untuk team tertentu
+    pada hari ini (WIB), diurutkan dari input paling baru ke yang lebih awal.
+    """
     df_spg = load_database()
     if df_spg is None or df_spg.empty:
         return []
@@ -1280,7 +1037,11 @@ def _is_same_team_reference(team_cell, team_name):
     team_name = normalize_text(team_name).lower()
     if not team_cell or team_cell == "nan" or team_cell == "none":
         return False
-    return team_cell == team_name
+
+    if team_cell == team_name:
+        return True
+
+    return False
 
 
 def get_schedule_info_for_team(team_name):
@@ -1519,6 +1280,7 @@ if not st.session_state["logged_in"]:
 # ====================================================
 if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
 
+    # --- MASTER NAMA TEAM ---
     if st.session_state["admin_view"] == "Master_Nama_Team":
         st.markdown("## 🏷️ Master Data: Nama Team (1 - 20)")
         st.caption("Ubah dan sesuaikan nama alias untuk Team SPG 1 sampai 20. Perubahan akan otomatis terhubung ke menu alokasi brand dan login.")
@@ -1548,6 +1310,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             st.rerun()
         st.stop()
 
+    # --- MASTER PLAT ---
     elif st.session_state["admin_view"] == "Master_Plat":
         st.markdown("## 🚗 Master Data: Plat Nomor Kendaraan Operasional")
         st.caption("Tambah atau hapus daftar plat nomor kendaraan operasional secara fleksibel.")
@@ -1591,6 +1354,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             st.rerun()
         st.stop()
 
+    # --- MASTER TEAM & BRAND ---
     elif st.session_state["admin_view"] == "Master_Team":
         st.markdown("## 👥 Master Data: Team 1 - 20 & Alokasi Brand Rokok")
         st.caption("Atur pilihan merek rokok yang dapat dibawa oleh masing-masing Team SPG (Team 1 sampai 20).")
@@ -1655,6 +1419,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             st.rerun()
         st.stop()
 
+    # --- MASTER SPG ---
     elif st.session_state["admin_view"] == "Master_SPG":
         st.markdown("## 👩‍💼 Master Data: Nama SPG")
         st.caption("Tambah, ubah, atau hapus daftar nama SPG aktif.")
@@ -1696,6 +1461,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             st.rerun()
         st.stop()
 
+    # --- MASTER BRAND & TARGET ---
     elif st.session_state["admin_view"] == "Master_Brand":
         st.markdown("## 🚬 Master Data: Merek Rokok & Target")
         st.caption("Tambah atau hapus brand, dan ubah target per SPG maupun per Team.")
@@ -1790,6 +1556,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             st.rerun()
         st.stop()
 
+    # --- MASTER LOKASI WARKOP ---
     elif st.session_state["admin_view"] == "Master_Lokasi":
         st.markdown("## 📍 Master Data: Lokasi Warkop / LKK (Excel)")
         st.caption("Mengelola data warkop/LKK dari file repository: Master WarkopLKK.xlsx")
@@ -1841,11 +1608,13 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             st.rerun()
         st.stop()
 
+    # --- MONITORING JADWAL SPG ---
     elif st.session_state["admin_view"] == "Master_Jadwal_Excel":
         st.markdown("## 📅 Entry & Monitoring Jadwal SPG (Kecamatan, Team & Tanggal)")
         render_schedule_entry()
         st.stop()
 
+    # --- ANALITIK ---
     elif st.session_state["admin_view"] == "Analitik":
         st.markdown("## 📊 Analitik & Rekapitulasi All User")
         st.caption("Laporan mendalam performa seluruh tim berdasarkan demografi, wilayah, dan sebaran kecamatan.")
@@ -1907,6 +1676,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             st.rerun()
         st.stop()
 
+    # --- PETA RUTE ---
     elif st.session_state["admin_view"] == "Peta_Rute":
         st.markdown("## 🗺️ Visualisasi Peta Rute & Poligon Kecamatan")
         st.caption("Pantau rute perjalanan dan batas wilayah poligon kecamatan berdasarkan filter Team SPG, Nama SPG, dan Tanggal.")
@@ -2009,6 +1779,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             st.rerun()
         st.stop()
 
+    # --- DASHBOARD ADMIN UTAMA ---
     st.markdown("## 📊 Dashboard Admin & Manajemen Lapangan")
     st.caption("Pilih menu master data atau pantau rekapitulasi tim secara real-time.")
 
@@ -2106,14 +1877,23 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                 .agg(Total_Omset_Team=("Jumlah_Bungkus", "sum"))
                 .reset_index()
             )
-            df_today_lb["Brand_Rokok_Clean"] = df_today_lb["Brand_Rokok"].apply(clean_brand_target_name)
+
+            def clean_brand_team_lb(b):
+                return clean_brand_target_name(b)
+
+            df_today_lb["Brand_Rokok_Clean"] = df_today_lb["Brand_Rokok"].apply(clean_brand_team_lb)
+
             df_today_lb = (
                 df_today_lb.groupby(["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Brand_Rokok_Clean"])
                 .agg(Total_Omset_Team=("Total_Omset_Team", "sum"))
                 .reset_index()
                 .rename(columns={"Brand_Rokok_Clean": "Brand_Rokok"})
             )
-            df_today_lb["Target_Team"] = df_today_lb["Brand_Rokok"].apply(lambda b: get_target_for_brand(b, "target_team", 50))
+
+            def get_team_target_lb(brand):
+                return get_target_for_brand(brand, "target_team", 50)
+
+            df_today_lb["Target_Team"] = df_today_lb["Brand_Rokok"].apply(get_team_target_lb)
             target_hari_ini = int(df_today_lb["Target_Team"].sum())
         else:
             target_hari_ini = 100
@@ -2134,20 +1914,70 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
 
         kpi_col1, kpi_col2, kpi_col3 = st.columns(3)
         with kpi_col1:
-            st.markdown(f'<div class="dashboard-card"><div><div class="card-value">{omset_hari_ini:,} bks</div><div class="card-subtext">dari {target_hari_ini} target bks</div></div><div class="card-label">Omset Hari Ini</div></div>', unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="dashboard-card">
+                <div>
+                    <div class="card-value">{omset_hari_ini:,} bks</div>
+                    <div class="card-subtext">dari {target_hari_ini} target bks</div>
+                </div>
+                <div class="card-label">Omset Hari Ini</div>
+            </div>
+            """, unsafe_allow_html=True)
         with kpi_col2:
             bar_width = min(persen_pencapaian, 100)
-            st.markdown(f'<div class="dashboard-card"><div><div class="card-value-green">{persen_pencapaian}%</div><div class="progress-bar-container"><div class="progress-bar-fill" style="width: {bar_width}%;"></div></div></div><div class="card-label">Pencapaian Omset Hari Ini</div></div>', unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="dashboard-card">
+                <div>
+                    <div class="card-value-green">{persen_pencapaian}%</div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar-fill" style="width: {bar_width}%;"></div>
+                    </div>
+                </div>
+                <div class="card-label">Pencapaian Omset Hari Ini</div>
+            </div>
+            """, unsafe_allow_html=True)
         with kpi_col3:
-            st.markdown(f'<div class="dashboard-card"><div><div class="card-value">{konsumen_hari_ini:,}</div><div class="card-subtext" style="opacity: 0;">-</div></div><div class="card-label">Konsumen Beli Hari Ini</div></div>', unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="dashboard-card">
+                <div>
+                    <div class="card-value">{konsumen_hari_ini:,}</div>
+                    <div class="card-subtext" style="opacity: 0;">-</div>
+                </div>
+                <div class="card-label">Konsumen Beli Hari Ini</div>
+            </div>
+            """, unsafe_allow_html=True)
 
         kpi_col4, kpi_col5, kpi_col6 = st.columns(3)
         with kpi_col4:
-            st.markdown(f'<div class="dashboard-card"><div><div class="card-value">{omset_minggu_ini:,} bks</div><div class="card-subtext">{konsumen_minggu_ini:,} Konsumen Minggu Ini</div></div><div class="card-label">Omset Minggu Ini</div></div>', unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="dashboard-card">
+                <div>
+                    <div class="card-value">{omset_minggu_ini:,} bks</div>
+                    <div class="card-subtext">{konsumen_minggu_ini:,} Konsumen Minggu Ini</div>
+                </div>
+                <div class="card-label">Omset Minggu Ini</div>
+            </div>
+            """, unsafe_allow_html=True)
         with kpi_col5:
-            st.markdown(f'<div class="dashboard-card"><div><div class="card-value">{omset_bulan_ini:,} bks</div><div class="card-subtext" style="opacity: 0;">-</div></div><div class="card-label">Omset Bulan Ini</div></div>', unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="dashboard-card">
+                <div>
+                    <div class="card-value">{omset_bulan_ini:,} bks</div>
+                    <div class="card-subtext" style="opacity: 0;">-</div>
+                </div>
+                <div class="card-label">Omset Bulan Ini</div>
+            </div>
+            """, unsafe_allow_html=True)
         with kpi_col6:
-            st.markdown(f'<div class="dashboard-card"><div><div class="card-value">{konsumen_bulan_ini:,}</div><div class="card-subtext" style="opacity: 0;">-</div></div><div class="card-label">Konsumen Beli Bulan Ini</div></div>', unsafe_allow_html=True)
+            st.markdown(f"""
+            <div class="dashboard-card">
+                <div>
+                    <div class="card-value">{konsumen_bulan_ini:,}</div>
+                    <div class="card-subtext" style="opacity: 0;">-</div>
+                </div>
+                <div class="card-label">Konsumen Beli Bulan Ini</div>
+            </div>
+            """, unsafe_allow_html=True)
 
         all_weeks_admin = sorted(df_all_users["Periode_Minggu"].dropna().unique().tolist(), reverse=True)
         all_dates_admin = sorted(df_all_users["Tanggal"].dropna().unique().tolist(), reverse=True)
@@ -2179,20 +2009,31 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                 .agg(Total_Omset_Team=("Jumlah_Bungkus", "sum"), Total_Konsumen_Beli=("Nama_Konsumen", "count"))
                 .reset_index()
             )
-            df_team_leaderboard["Brand_Rokok_Clean"] = df_team_leaderboard["Brand_Rokok"].apply(clean_brand_target_name)
+
+            def clean_brand_team(b):
+                return clean_brand_target_name(b)
+
+            df_team_leaderboard["Brand_Rokok_Clean"] = df_team_leaderboard["Brand_Rokok"].apply(clean_brand_team)
+
             df_team_leaderboard = (
                 df_team_leaderboard.groupby(["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Brand_Rokok_Clean"])
                 .agg(Total_Omset_Team=("Total_Omset_Team", "sum"), Total_Konsumen_Beli=("Total_Konsumen_Beli", "sum"))
                 .reset_index()
                 .rename(columns={"Brand_Rokok_Clean": "Brand_Rokok"})
             )
-            df_team_leaderboard["Target_Team"] = df_team_leaderboard["Brand_Rokok"].apply(lambda b: get_target_for_brand(b, "target_team", 50))
+
+            def get_team_target(brand):
+                return get_target_for_brand(brand, "target_team", 50)
+
+            df_team_leaderboard["Target_Team"] = df_team_leaderboard["Brand_Rokok"].apply(get_team_target)
             df_team_leaderboard["Status_Target_Team"] = df_team_leaderboard.apply(
                 lambda r: "Achieved" if r["Total_Omset_Team"] >= r["Target_Team"] else "Not Achieved",
-                axis=1,
+                axis=1
             )
+
             cols_lb_order = ["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Brand_Rokok", "Total_Omset_Team", "Total_Konsumen_Beli", "Target_Team", "Status_Target_Team"]
             df_team_leaderboard = df_team_leaderboard[[c for c in cols_lb_order if c in df_team_leaderboard.columns]]
+
             st.dataframe(df_team_leaderboard.style.map(style_status_target, subset=["Status_Target_Team"]), use_container_width=True)
         else:
             st.info("Tidak ada data untuk filter Leaderboard yang dipilih.")
@@ -2232,6 +2073,9 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
         else:
             st.info("Tidak ada data untuk filter Rokok Laku yang dipilih.")
 
+    # ====================================================
+    # REKAPITULASI COMBINE PER TITIK LKK
+    # ====================================================
     st.markdown("---")
     st.markdown("### 📊 Rekapitulasi Combine Per Titik LKK (All Team)")
     st.caption("Gabungan data jumlah kontak manual Supervisi dan penjualan konsumen SPG per titik Warkop/LKK.")
@@ -2508,16 +2352,12 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
 # HALAMAN LOGIN UTAMA
 # ====================================================
 if not st.session_state["logged_in"]:
-    preview_team = st.session_state.get("selected_team_login", "")
-    preview_theme = get_team_theme(preview_team, is_supervisi=(st.session_state["login_mode"] == "Supervisi"))
-    apply_custom_css(preview_theme)
-
     st.markdown(
-        f"""
-        <div class="login-header" style="background: {preview_theme['banner_bg']}; border: 1.5px solid {preview_theme['border']}; box-shadow: {preview_theme['glow']};">
+        """
+        <div class="login-header">
             <div style="font-size: 2.2rem; margin-bottom: 4px;">📍</div>
-            <h1 style="color: {preview_theme['text_primary']} !important;">PORTAL LAPORAN &amp; MONITORING</h1>
-            <p style="color: {preview_theme['text_secondary']} !important;">Sistem Pelaporan Lapangan SPG &amp; Supervisi</p>
+            <h1>PORTAL LAPORAN &amp; MONITORING</h1>
+            <p>Sistem Pelaporan Lapangan SPG &amp; Supervisi</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -2617,14 +2457,8 @@ if not st.session_state["logged_in"]:
     st.stop()
 
 # ====================================================
-# APLIKASI UTAMA SETELAH LOGIN (TEMA DINAMIS PER TEAM)
+# APLIKASI UTAMA SETELAH LOGIN
 # ====================================================
-active_theme = get_team_theme(
-    st.session_state["user_spg"],
-    is_supervisi=(st.session_state["login_mode"] == "Supervisi"),
-)
-apply_custom_css(active_theme)
-
 col_banner, col_logout = st.columns([0.8, 0.2])
 
 with col_banner:
@@ -2632,7 +2466,6 @@ with col_banner:
     st.markdown(
         f"""
         <div class="user-banner">
-            <div class="theme-pill">🎨 {active_theme['label']}</div>
             <div class="user-banner-title">
                 <span>👤 {st.session_state['user_spg']}</span>
                 <span class="badge-mode">{mode_badge}</span>
@@ -2665,6 +2498,7 @@ if gdf_wilayah is not None:
     else:
         daftar_kecamatan = ["Kecamatan Default"]
 
+# GPS
 loc = get_geolocation()
 detected_kecamatan = None
 
@@ -2703,6 +2537,9 @@ else:
         f"{st.session_state['kota_kab']} (Lat: `{user_lat:.6f}`, Lon: `{user_lon:.6f}`)."
     )
 
+# ====================================================
+# VALIDASI JADWAL SPG DARI EXCEL
+# ====================================================
 schedule_ok, _, _, daftar_kecamatan_terjadwal, _ = get_schedule_info_for_team(st.session_state["user_spg"])
 
 if not schedule_ok:
@@ -3087,7 +2924,12 @@ if not df_user_rekap.empty:
         )
         .reset_index()
     )
-    df_eval_spg["Brand_Rokok_Clean"] = df_eval_spg["Brand_Rokok"].apply(clean_brand_target_name)
+
+    def clean_brand_spg(b):
+        return clean_brand_target_name(b)
+
+    df_eval_spg["Brand_Rokok_Clean"] = df_eval_spg["Brand_Rokok"].apply(clean_brand_spg)
+
     df_eval_spg = (
         df_eval_spg.groupby(["Tanggal", "Periode_Minggu", "Nama_SPG", "Brand_Rokok_Clean"])
         .agg(
@@ -3098,10 +2940,14 @@ if not df_user_rekap.empty:
         .reset_index()
         .rename(columns={"Brand_Rokok_Clean": "Brand_Rokok"})
     )
-    df_eval_spg["Target_SPG"] = df_eval_spg["Brand_Rokok"].apply(lambda b: get_target_for_brand(b, "target_spg", 25))
+
+    def get_spg_target(brand):
+        return get_target_for_brand(brand, "target_spg", 25)
+
+    df_eval_spg["Target_SPG"] = df_eval_spg["Brand_Rokok"].apply(get_spg_target)
     df_eval_spg["Status_Target_SPG"] = df_eval_spg.apply(
         lambda r: "Achieved" if r["Jumlah_Omset_SPG"] >= r["Target_SPG"] else "Not Achieved",
-        axis=1,
+        axis=1
     )
 
     cols_eval_order = ["Tanggal", "Periode_Minggu", "Nama_SPG", "Brand_Rokok", "Jumlah_Titik_Warkop", "Konsumen_Beli", "Jumlah_Omset_SPG", "Target_SPG", "Status_Target_SPG"]
