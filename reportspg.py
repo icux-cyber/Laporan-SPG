@@ -27,6 +27,81 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+
+def get_team_theme(team_name: str) -> dict:
+    """Mengembalikan konfigurasi palet warna dinamis berdasarkan nama team."""
+    name = str(team_name or "").casefold()
+    if "matcha" in name:
+        return {
+            "banner_bg": "linear-gradient(135deg, #090D0B 0%, #132A1E 100%)",
+            "banner_border": "#22C55E",
+            "badge_bg": "rgba(34, 197, 94, 0.18)",
+            "badge_color": "#4ADE80",
+            "btn_bg": "linear-gradient(135deg, #16A34A 0%, #052E16 100%)",
+            "btn_shadow": "0 4px 12px rgba(22, 163, 74, 0.30)",
+            "addr_bg": "#ECFDF5",
+            "addr_border": "#86EFAC",
+            "addr_accent": "#16A34A",
+            "addr_text": "#064E3B",
+            "accent_hex": "#22C55E",
+        }
+    if "super" in name:
+        return {
+            "banner_bg": "linear-gradient(135deg, #7F1D1D 0%, #450A0A 100%)",
+            "banner_border": "#F59E0B",
+            "badge_bg": "rgba(245, 158, 11, 0.20)",
+            "badge_color": "#FCD34D",
+            "btn_bg": "linear-gradient(135deg, #DC2626 0%, #B45309 100%)",
+            "btn_shadow": "0 4px 12px rgba(220, 38, 38, 0.30)",
+            "addr_bg": "#FFFBEB",
+            "addr_border": "#FDE68A",
+            "addr_accent": "#D97706",
+            "addr_text": "#78350F",
+            "accent_hex": "#F59E0B",
+        }
+    if "aksara" in name or "akasar" in name:
+        return {
+            "banner_bg": "linear-gradient(135deg, #0F1115 0%, #27200E 100%)",
+            "banner_border": "#EAB308",
+            "badge_bg": "rgba(234, 179, 8, 0.20)",
+            "badge_color": "#FACC15",
+            "btn_bg": "linear-gradient(135deg, #18181B 0%, #CA8A04 100%)",
+            "btn_shadow": "0 4px 12px rgba(202, 138, 4, 0.28)",
+            "addr_bg": "#FEFCE8",
+            "addr_border": "#FEF08A",
+            "addr_accent": "#CA8A04",
+            "addr_text": "#713F12",
+            "accent_hex": "#EAB308",
+        }
+    if "apel" in name:
+        return {
+            "banner_bg": "linear-gradient(135deg, #9A3412 0%, #7F1D1D 100%)",
+            "banner_border": "#EF4444",
+            "badge_bg": "rgba(239, 68, 68, 0.20)",
+            "badge_color": "#FCA5A5",
+            "btn_bg": "linear-gradient(135deg, #EA580C 0%, #DC2626 100%)",
+            "btn_shadow": "0 4px 12px rgba(234, 88, 12, 0.30)",
+            "addr_bg": "#FFF7ED",
+            "addr_border": "#FDBA74",
+            "addr_accent": "#EA580C",
+            "addr_text": "#7C2D12",
+            "accent_hex": "#EF4444",
+        }
+    return {
+        "banner_bg": "linear-gradient(135deg, #0F172A 0%, #1E293B 100%)",
+        "banner_border": "#DC2626",
+        "badge_bg": "rgba(56, 189, 248, 0.15)",
+        "badge_color": "#38BDF8",
+        "btn_bg": "linear-gradient(135deg, #DC2626 0%, #B91C1C 100%)",
+        "btn_shadow": "0 4px 12px rgba(220, 38, 38, 0.25)",
+        "addr_bg": "#EFF6FF",
+        "addr_border": "#BFDBFE",
+        "addr_accent": "#2563EB",
+        "addr_text": "#1E3A8A",
+        "accent_hex": "#DC2626",
+    }
+
+
 # ====================================================
 # CUSTOM CSS UNTUK UI MODERN & MOBILE-FRIENDLY
 # ====================================================
@@ -252,6 +327,42 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+
+def apply_team_theme_css(team_name: str):
+    """Menerapkan gaya CSS tema warna dinamis pada halaman User (SPG & Supervisi)."""
+    t = get_team_theme(team_name)
+    st.markdown(
+        f"""
+        <style>
+        .user-banner {{
+            background: {t["banner_bg"]} !important;
+            border-left: 5px solid {t["banner_border"]} !important;
+        }}
+        .badge-mode {{
+            background-color: {t["badge_bg"]} !important;
+            color: {t["badge_color"]} !important;
+        }}
+        [data-testid="stFormSubmitButton"] > button,
+        div.stButton > button[kind="primary"] {{
+            background: {t["btn_bg"]} !important;
+            box-shadow: {t["btn_shadow"]} !important;
+        }}
+        .address-box {{
+            background-color: {t["addr_bg"]} !important;
+            border: 1px solid {t["addr_border"]} !important;
+            border-left: 4px solid {t["addr_accent"]} !important;
+            color: {t["addr_text"]} !important;
+        }}
+        .section-title {{
+            border-left: 4px solid {t["accent_hex"]};
+            padding-left: 10px;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 # ====================================================
 # DEFINISI FILE DATABASE LOKAL & KONFIGURASI GOOGLE SHEET
@@ -786,6 +897,63 @@ def get_latest_supervisi_point_today(
                 "waktu": str(row.get("Waktu", "") or "").strip(),
             }
     return None
+
+
+def get_supervisi_points_today(
+    team_name: str,
+    fallback_kota: str = "",
+    fallback_kec: str = "",
+    df_sup: pd.DataFrame | None = None,
+) -> list[dict]:
+    """Mengambil daftar titik LKK unik yang sudah diinput Supervisi hari ini (terbaru di atas)."""
+    today_str = (datetime.utcnow() + timedelta(hours=7)).strftime("%Y-%m-%d")
+    if df_sup is None:
+        df_sup = load_supervisi_database()
+    if df_sup is None or df_sup.empty:
+        return []
+
+    mask = (
+        df_sup["Promotor"].astype(str).str.strip().str.casefold()
+        == str(team_name or "").strip().casefold()
+    ) & (
+        df_sup["Waktu"].astype(str).str.startswith(today_str)
+    )
+    if fallback_kota:
+        mask = mask & (
+            df_sup["Kota_Kab"].astype(str).str.strip().str.casefold()
+            == str(fallback_kota).strip().casefold()
+        )
+
+    df_today = df_sup[mask].copy()
+    if df_today.empty:
+        return []
+
+    parsed = pd.to_datetime(df_today["Waktu"], errors="coerce")
+    if parsed.notna().any():
+        df_today = df_today.assign(_dt=parsed).sort_values("_dt", ascending=False)
+    else:
+        df_today = df_today.iloc[::-1]
+
+    points = []
+    seen = set()
+    for _, row in df_today.iterrows():
+        warkop = str(row.get("Warkop_LKK", "") or "").strip()
+        if not warkop:
+            continue
+        kec = str(row.get("Kecamatan", fallback_kec) or fallback_kec).strip()
+        key = (kec.casefold(), warkop.casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        points.append({
+            "kota": str(row.get("Kota_Kab", fallback_kota) or fallback_kota).strip(),
+            "kecamatan": kec,
+            "warkop": warkop,
+            "alamat": str(row.get("Alamat_Warkop", "-") or "-").strip() or "-",
+            "kontak": int(pd.to_numeric(row.get("Jumlah_Kontak_Manual", 0), errors="coerce") or 0),
+            "waktu": str(row.get("Waktu", "") or "").strip(),
+        })
+    return points
 
 
 # ====================================================
@@ -2068,7 +2236,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
     # ====================================================
     st.markdown("---")
     st.markdown("### 📊 Rekapitulasi Combine Per Titik LKK (All Team)")
-    st.caption("Gabungan data jumlah kontak manual Supervisi dan penjualan konsumen SPG per titik Warkop/LKK.")
+    st.caption("Titik LKK tampil setelah Supervisi menginput jumlah kontak; kontak bersifat per team di titik LKK yang sama.")
 
     if not df_all_supervisi.empty:
         df_all_supervisi["Waktu_Dt"] = pd.to_datetime(df_all_supervisi["Waktu"], errors="coerce")
@@ -2113,6 +2281,17 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
     if filter_lkk_team and not df_sup_lkk_filtered.empty:
         df_sup_lkk_filtered = df_sup_lkk_filtered[df_sup_lkk_filtered["Promotor"].isin(filter_lkk_team)]
 
+    df_rekap_sup_admin = pd.DataFrame(columns=["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Kecamatan", "Warkop_LKK", "Plat_Mobil_Supervisi", "Jumlah_Kontak_Manual"])
+    if not df_sup_lkk_filtered.empty:
+        df_rekap_sup_admin = (
+            df_sup_lkk_filtered.groupby(["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Kecamatan", "Warkop_LKK"])
+            .agg(
+                Plat_Mobil_Supervisi=("Plat_Mobil", lambda x: ", ".join([str(v) for v in x.dropna().unique() if str(v) != "-"])),
+                Jumlah_Kontak_Manual=("Jumlah_Kontak_Manual", "sum"),
+            )
+            .reset_index()
+        )
+
     df_rekap_spg_admin = pd.DataFrame(columns=["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Kecamatan", "Warkop_LKK", "Alamat_Warkop", "SPG_Bertugas", "Konsumen_Beli", "Total_Omset_Bungkus"])
     if not df_spg_lkk_filtered.empty:
         df_rekap_spg_admin = (
@@ -2125,34 +2304,20 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             .reset_index()
         )
 
-    df_rekap_sup_admin = pd.DataFrame(columns=["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Kecamatan", "Warkop_LKK", "Plat_Mobil_Supervisi", "Jumlah_Kontak_Manual"])
-    if not df_sup_lkk_filtered.empty:
-        df_rekap_sup_admin = (
-            df_sup_lkk_filtered.groupby(["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Kecamatan", "Warkop_LKK"])
-            .agg(
-                Plat_Mobil_Supervisi=("Plat_Mobil", lambda x: ", ".join([str(v) for v in x.dropna().unique() if str(v) != "-"])),
-                Jumlah_Kontak_Manual=("Jumlah_Kontak_Manual", "sum"),
-            )
-            .reset_index()
-        )
-
-    if not df_rekap_spg_admin.empty or not df_rekap_sup_admin.empty:
+    # Titik LKK tampil pada rekap setelah Supervisi menginput jumlah kontak di titik tersebut
+    if not df_rekap_sup_admin.empty:
         if df_rekap_spg_admin.empty:
             df_combine_admin = df_rekap_sup_admin.copy()
             df_combine_admin["Alamat_Warkop"] = "-"
             df_combine_admin["SPG_Bertugas"] = "-"
             df_combine_admin["Konsumen_Beli"] = 0
             df_combine_admin["Total_Omset_Bungkus"] = 0
-        elif df_rekap_sup_admin.empty:
-            df_combine_admin = df_rekap_spg_admin.copy()
-            df_combine_admin["Plat_Mobil_Supervisi"] = "-"
-            df_combine_admin["Jumlah_Kontak_Manual"] = 0
         else:
             df_combine_admin = pd.merge(
-                df_rekap_spg_admin,
                 df_rekap_sup_admin,
+                df_rekap_spg_admin,
                 on=["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Kecamatan", "Warkop_LKK"],
-                how="outer",
+                how="left",
             ).fillna({
                 "Alamat_Warkop": "-",
                 "SPG_Bertugas": "-",
@@ -2186,7 +2351,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             key="btn_dl_combine_lkk_admin",
         )
     else:
-        st.info("Belum ada data rekapitulasi gabungan LKK yang tersedia untuk filter yang dipilih.")
+        st.info("Belum ada titik LKK yang diinput jumlah kontaknya oleh Supervisi untuk filter yang dipilih.")
 
     with st.expander("🗑️ Menu Hapus Data Kontak Supervisi / Rekap LKK (Per Row / Hari / Minggu / All Data)", expanded=False):
         if not df_all_supervisi.empty:
@@ -2447,8 +2612,10 @@ if not st.session_state["logged_in"]:
     st.stop()
 
 # ====================================================
-# APLIKASI UTAMA SETELAH LOGIN
+# APLIKASI UTAMA SETELAH LOGIN (TEMA DINAMIS PER TEAM)
 # ====================================================
+apply_team_theme_css(st.session_state["user_spg"])
+
 col_banner, col_logout = st.columns([0.8, 0.2])
 
 with col_banner:
@@ -2537,76 +2704,68 @@ if not schedule_ok:
 else:
     daftar_kecamatan_terjadwal = sorted(set(daftar_kecamatan_terjadwal))
 
+# ====================================================
+# TITIK KUNJUNGAN LAPANGAN (SINKRON DENGAN SUPERVISI)
+# ====================================================
 st.markdown('<div class="section-title">📍 Titik Kunjungan Lapangan</div>', unsafe_allow_html=True)
 with st.container(border=True):
-    active_spg_points = []
-    if st.session_state["login_mode"] == "Supervisi":
-        active_spg_points = get_active_spg_points_today(
-            team_name=st.session_state["user_spg"],
-            fallback_kota=st.session_state.get("kota_kab", ""),
-        )
+    df_sup_today_all = load_supervisi_database()
+    latest_sup_point = get_latest_supervisi_point_today(
+        team_name=st.session_state["user_spg"],
+        fallback_kota=st.session_state.get("kota_kab", ""),
+        df_sup=df_sup_today_all,
+    )
+    sup_points_today = get_supervisi_points_today(
+        team_name=st.session_state["user_spg"],
+        fallback_kota=st.session_state.get("kota_kab", ""),
+        df_sup=df_sup_today_all,
+    )
 
-    if st.session_state["login_mode"] == "Supervisi" and active_spg_points:
-        point_labels = [
-            f"{p['warkop']} ({p['kecamatan']}) — {p['spg'] or 'SPG'} [{p['waktu']}]"
-            for p in active_spg_points
-        ]
+    df_master_excel = load_master_lokasi_excel()
+    col_kec_excel = next(
+        (c for c in df_master_excel.columns if "kec" in c.lower() or "wilayah" in c.lower()),
+        None,
+    ) if not df_master_excel.empty else None
+    col_warkop_excel = next(
+        (c for c in df_master_excel.columns if "warkop" in c.lower() or "lkk" in c.lower() or "nama" in c.lower()),
+        None,
+    ) if not df_master_excel.empty else None
+    col_alamat_excel = next(
+        (c for c in df_master_excel.columns if "alamat" in c.lower() or "address" in c.lower()),
+        None,
+    ) if not df_master_excel.empty else None
+
+    if st.session_state["login_mode"] == "Supervisi":
         col_sync_1, col_sync_2 = st.columns([0.78, 0.22])
         with col_sync_1:
-            selected_point_label = st.selectbox(
-                "🔗 Titik Aktif SPG Hari Ini",
-                options=point_labels,
-                index=0,
-                help="Titik otomatis diambil dari input SPG hari ini (urutan terbaru di paling atas).",
-            )
+            if latest_sup_point:
+                st.success(
+                    f"🔗 **Titik Aktif Tim Hari Ini:** **{latest_sup_point['warkop']}** "
+                    f"({latest_sup_point['kecamatan']}) • Kontak Tim: **{latest_sup_point['kontak']}**"
+                )
+            else:
+                st.info("ℹ️ Pilih Kecamatan & Warkop/LKK di bawah, lalu simpan jumlah kontak agar titik aktif tersinkronisasi ke report & tim.")
         with col_sync_2:
-            st.markdown("<div style='height: 26px;'></div>", unsafe_allow_html=True)
-            if st.button("🔄 Refresh", key="btn_refresh_spg_points", use_container_width=True):
+            st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
+            if st.button("🔄 Refresh", key="btn_refresh_sup_points", use_container_width=True):
                 st.rerun()
 
-        selected_point = active_spg_points[point_labels.index(selected_point_label)]
-        kecamatan_pilihan = selected_point["kecamatan"] or (
-            daftar_kecamatan_terjadwal[0] if daftar_kecamatan_terjadwal else "Kecamatan Umum"
-        )
-        nama_warkop_manual = selected_point["warkop"]
-        alamat_warkop_terpilih = selected_point["alamat"]
-    else:
         kecamatan_pilihan = st.selectbox(
             f"Kecamatan Tujuan ({st.session_state['kota_kab']})",
             options=daftar_kecamatan_terjadwal,
             help="Kecamatan difilter otomatis sesuai penugasan jadwal hari ini yang dikelola di menu admin.",
         )
 
-        df_master_excel = load_master_lokasi_excel()
-        filtered_df_warkop = pd.DataFrame()
         filtered_warkop_list = []
-        col_kec_excel = None
-        col_warkop_excel = None
-        col_alamat_excel = None
-
-        if not df_master_excel.empty:
-            col_kec_excel = next(
-                (c for c in df_master_excel.columns if "kec" in c.lower() or "wilayah" in c.lower()),
-                None,
+        if not df_master_excel.empty and col_kec_excel and col_warkop_excel:
+            mask = (
+                df_master_excel[col_kec_excel].astype(str).str.strip().str.lower()
+                == str(kecamatan_pilihan).strip().lower()
             )
-            col_warkop_excel = next(
-                (c for c in df_master_excel.columns if "warkop" in c.lower() or "lkk" in c.lower() or "nama" in c.lower()),
-                None,
-            )
-            col_alamat_excel = next(
-                (c for c in df_master_excel.columns if "alamat" in c.lower() or "address" in c.lower()),
-                None,
-            )
-
-            if col_kec_excel and col_warkop_excel:
-                mask = (
-                    df_master_excel[col_kec_excel].astype(str).str.strip().str.lower()
-                    == str(kecamatan_pilihan).strip().lower()
-                )
-                filtered_df_warkop = df_master_excel[mask]
-                if filtered_df_warkop.empty:
-                    filtered_df_warkop = df_master_excel.copy()
-                filtered_warkop_list = filtered_df_warkop[col_warkop_excel].dropna().unique().tolist()
+            filtered_df_warkop = df_master_excel[mask]
+            if filtered_df_warkop.empty:
+                filtered_df_warkop = df_master_excel.copy()
+            filtered_warkop_list = filtered_df_warkop[col_warkop_excel].dropna().unique().tolist()
 
         if not filtered_warkop_list:
             filtered_warkop_list = ["Warkop Alternatif 1", "Warkop Alternatif 2"]
@@ -2623,13 +2782,49 @@ with st.container(border=True):
             ]
             if not match_row.empty:
                 alamat_warkop_terpilih = str(match_row.iloc[0][col_alamat_excel])
+    else:
+        # Mode SPG: tetap bisa langsung isi form kapan saja tanpa menunggu Supervisi,
+        # namun titik LKK yang tersinkronisasi mengikuti titik terbaru yang sudah diinput Supervisi hari ini.
+        col_spg_s1, col_spg_s2 = st.columns([0.78, 0.22])
+        with col_spg_s1:
+            if latest_sup_point:
+                st.success(
+                    f"🔗 **Titik LKK Aktif (Dari Supervisi):** **{latest_sup_point['warkop']}** "
+                    f"({latest_sup_point['kecamatan']}) • Kontak Tim: **{latest_sup_point['kontak']}**"
+                )
+            else:
+                st.info("ℹ️ Menunggu input kontak Supervisi hari ini untuk sinkronisasi titik LKK. Form laporan SPG tetap bisa langsung diisi.")
+        with col_spg_s2:
+            st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
+            if st.button("🔄 Refresh", key="btn_refresh_spg_sync", use_container_width=True):
+                st.rerun()
 
-        if st.session_state["login_mode"] == "Supervisi":
-            st.info("⏳ Belum ada input titik Warkop dari SPG hari ini; sementara memakai daftar master lokasi.")
+        if latest_sup_point:
+            kecamatan_pilihan = latest_sup_point["kecamatan"] or (
+                daftar_kecamatan_terjadwal[0] if daftar_kecamatan_terjadwal else "Kecamatan Umum"
+            )
+            nama_warkop_manual = latest_sup_point["warkop"]
+            alamat_warkop_terpilih = latest_sup_point["alamat"]
+        else:
+            kecamatan_pilihan = daftar_kecamatan_terjadwal[0] if daftar_kecamatan_terjadwal else "Kecamatan Umum"
+            default_warkop = "-"
+            if not df_master_excel.empty and col_warkop_excel:
+                w_vals = df_master_excel[col_warkop_excel].dropna().unique().tolist()
+                if w_vals:
+                    default_warkop = str(w_vals[0]).strip()
+            nama_warkop_manual = default_warkop
+            alamat_warkop_terpilih = "-"
+            if not df_master_excel.empty and col_warkop_excel and col_alamat_excel and default_warkop != "-":
+                match_row = df_master_excel[
+                    df_master_excel[col_warkop_excel].astype(str).str.strip() == default_warkop
+                ]
+                if not match_row.empty:
+                    alamat_warkop_terpilih = str(match_row.iloc[0][col_alamat_excel])
 
     st.markdown(f"""
     <div class="address-box">
-        📍 <b>Alamat:</b> {alamat_warkop_terpilih}
+        📍 <b>Kecamatan:</b> {kecamatan_pilihan} &nbsp;|&nbsp; <b>Warkop / LKK:</b> {nama_warkop_manual}<br/>
+        🏠 <b>Alamat:</b> {alamat_warkop_terpilih}
     </div>
     """, unsafe_allow_html=True)
 
@@ -2639,18 +2834,18 @@ with st.container(border=True):
 if st.session_state["login_mode"] == "Supervisi":
     st.markdown("---")
     st.markdown(f"### 👀 Dashboard Monitoring & Entry Supervisi: {st.session_state['user_spg']} (Plat Mobil: `{st.session_state['plat_mobil']}`)")
-    st.caption("Supervisor menginput jumlah kontak konsumen di warkop ini secara manual.")
+    st.caption("Kontak Supervisi bersifat per team di titik LKK yang sama (tidak dipecah/digandakan per SPG).")
 
     with st.form("form_entry_kontak_supervisi"):
-        st.markdown("#### 📝 Input Manual Jumlah Kontak Konsumen (Oleh Supervisi)")
+        st.markdown("#### 📝 Input Manual Jumlah Kontak Konsumen Tim (Oleh Supervisi)")
         jumlah_kontak_input = st.number_input(
-            f"Jumlah Kontak Konsumen di {nama_warkop_manual}",
+            f"Jumlah Kontak Konsumen Tim di {nama_warkop_manual}",
             min_value=0,
             step=1,
             value=0,
-            help="Masukkan jumlah total orang/konsumen yang berhasil dikontak di warkop ini",
+            help="Masukkan jumlah total kontak konsumen yang berhasil dihubungi tim di titik LKK ini",
         )
-        btn_simpan_kontak = st.form_submit_button("💾 Simpan Jumlah Kontak Warkop Ini", type="primary")
+        btn_simpan_kontak = st.form_submit_button("💾 Simpan Jumlah Kontak Titik LKK Ini", type="primary")
 
         if btn_simpan_kontak:
             df_sup_db = load_supervisi_database()
@@ -2667,7 +2862,11 @@ if st.session_state["login_mode"] == "Supervisi":
             }
             df_sup_db = pd.concat([df_sup_db, pd.DataFrame([new_sup_row])], ignore_index=True)
             save_supervisi_database(df_sup_db)
-            st.success(f"✅ Berhasil mencatat **{jumlah_kontak_input} kontak konsumen** untuk warkop **{nama_warkop_manual}**!")
+            st.success(
+                f"✅ Berhasil menyimpan **{jumlah_kontak_input} kontak tim** untuk titik "
+                f"**{nama_warkop_manual}**! Titik langsung tampil di Rekapitulasi Combine & tersinkronisasi ke tim."
+            )
+            st.rerun()
 
     st.markdown("---")
 
@@ -2687,15 +2886,15 @@ if st.session_state["login_mode"] == "Supervisi":
         df_current_team_spg["Jumlah_Bungkus"] = pd.to_numeric(df_current_team_spg["Jumlah_Bungkus"], errors="coerce").fillna(0)
         df_lkk_active_spg = df_current_team_spg[df_current_team_spg["Warkop_LKK"].astype(str).str.strip() == str(nama_warkop_manual).strip()]
 
-    kontak_manual_lkk_ini = 0
+    kontak_supervisi_team_lkk = 0
     if not df_current_team_sup.empty:
         df_lkk_active_sup = df_current_team_sup[df_current_team_sup["Warkop_LKK"].astype(str).str.strip() == str(nama_warkop_manual).strip()]
         if not df_lkk_active_sup.empty:
-            kontak_manual_lkk_ini = int(df_lkk_active_sup["Jumlah_Kontak_Manual"].astype(int).sum())
+            kontak_supervisi_team_lkk = int(pd.to_numeric(df_lkk_active_sup["Jumlah_Kontak_Manual"], errors="coerce").fillna(0).sum())
 
     col_mon1, col_mon2, col_mon3, col_mon4 = st.columns(4)
     with col_mon1:
-        st.markdown(f'<div class="dashboard-card"><div class="card-value">{kontak_manual_lkk_ini}</div><div class="card-label">Kontak (Input Supervisi)</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="dashboard-card"><div class="card-value">{kontak_supervisi_team_lkk}</div><div class="card-label">Kontak Supervisi Team</div></div>', unsafe_allow_html=True)
     with col_mon2:
         total_konsumen_beli = len(df_lkk_active_spg)
         st.markdown(f'<div class="dashboard-card"><div class="card-value">{total_konsumen_beli}</div><div class="card-label">Konsumen Beli (SPG)</div></div>', unsafe_allow_html=True)
@@ -2709,6 +2908,15 @@ if st.session_state["login_mode"] == "Supervisi":
     st.markdown("---")
     st.markdown(f"#### 📊 Rekapitulasi Combine Per Titik LKK ({st.session_state['user_spg']})")
 
+    df_rekap_sup = pd.DataFrame(columns=["Kecamatan", "Warkop_LKK", "Kontak_Supervisi_Team"])
+    if not df_current_team_sup.empty:
+        df_current_team_sup["Jumlah_Kontak_Manual"] = pd.to_numeric(df_current_team_sup["Jumlah_Kontak_Manual"], errors="coerce").fillna(0).astype(int)
+        df_rekap_sup = (
+            df_current_team_sup.groupby(["Kecamatan", "Warkop_LKK"])
+            .agg(Kontak_Supervisi_Team=("Jumlah_Kontak_Manual", "sum"))
+            .reset_index()
+        )
+
     df_rekap_spg = pd.DataFrame(columns=["Kecamatan", "Warkop_LKK", "Alamat_Warkop", "Jumlah_SPG_Bertugas", "Konsumen_Beli", "Total_Omset_Bungkus"])
     if not df_current_team_spg.empty:
         df_rekap_spg = (
@@ -2721,37 +2929,31 @@ if st.session_state["login_mode"] == "Supervisi":
             .reset_index()
         )
 
-    df_rekap_sup = pd.DataFrame(columns=["Kecamatan", "Warkop_LKK", "Jumlah_Kontak_Manual"])
-    if not df_current_team_sup.empty:
-        df_rekap_sup = (
-            df_current_team_sup.groupby(["Kecamatan", "Warkop_LKK"])
-            .agg(Jumlah_Kontak_Manual=("Jumlah_Kontak_Manual", "sum"))
-            .reset_index()
-        )
-
-    if not df_rekap_spg.empty or not df_rekap_sup.empty:
+    if not df_rekap_sup.empty:
         if df_rekap_spg.empty:
             df_combine_rekap = df_rekap_sup.copy()
             df_combine_rekap["Jumlah_SPG_Bertugas"] = "-"
             df_combine_rekap["Konsumen_Beli"] = 0
             df_combine_rekap["Total_Omset_Bungkus"] = 0
             df_combine_rekap["Alamat_Warkop"] = "-"
-        elif df_rekap_sup.empty:
-            df_combine_rekap = df_rekap_spg.copy()
-            df_combine_rekap["Jumlah_Kontak_Manual"] = 0
         else:
-            df_combine_rekap = pd.merge(df_rekap_spg, df_rekap_sup, on=["Kecamatan", "Warkop_LKK"], how="outer").fillna({
-                "Jumlah_Kontak_Manual": 0,
+            df_combine_rekap = pd.merge(df_rekap_sup, df_rekap_spg, on=["Kecamatan", "Warkop_LKK"], how="left").fillna({
+                "Kontak_Supervisi_Team": 0,
                 "Konsumen_Beli": 0,
                 "Total_Omset_Bungkus": 0,
                 "Jumlah_SPG_Bertugas": "-",
                 "Alamat_Warkop": "-",
             })
 
-        df_combine_rekap = df_combine_rekap[["Kecamatan", "Warkop_LKK", "Alamat_Warkop", "Jumlah_SPG_Bertugas", "Jumlah_Kontak_Manual", "Konsumen_Beli", "Total_Omset_Bungkus"]].sort_values(by="Total_Omset_Bungkus", ascending=False)
+        df_combine_rekap["Kontak_Supervisi_Team"] = df_combine_rekap["Kontak_Supervisi_Team"].astype(int)
+        df_combine_rekap["Konsumen_Beli"] = df_combine_rekap["Konsumen_Beli"].astype(int)
+        df_combine_rekap["Total_Omset_Bungkus"] = df_combine_rekap["Total_Omset_Bungkus"].astype(int)
+        df_combine_rekap = df_combine_rekap[
+            ["Kecamatan", "Warkop_LKK", "Alamat_Warkop", "Jumlah_SPG_Bertugas", "Kontak_Supervisi_Team", "Konsumen_Beli", "Total_Omset_Bungkus"]
+        ].sort_values(by="Total_Omset_Bungkus", ascending=False)
         st.dataframe(df_combine_rekap, use_container_width=True)
     else:
-        st.info("Belum ada data rekapitulasi gabungan untuk team ini.")
+        st.info("Titik LKK akan muncul di rekap setelah Supervisi selesai menginput jumlah kontak.")
 
     st.markdown("#### 📑 Log Detail Konsumen Beli (SPG) di Warkop Ini")
     if not df_lkk_active_spg.empty:
@@ -2770,6 +2972,7 @@ if daftar_master_spg:
 else:
     nama_spg_manual = st.text_input("👩‍💼 Nama SPG (Entry Manual)", placeholder="Contoh: Nanda")
 
+# Form SPG tetap bisa langsung diisi kapan saja (tidak diblok menunggu Supervisi)
 if is_inside_geofence and str(nama_spg_manual).strip() != "" and str(nama_warkop_manual).strip() != "":
     st.success(f"✅ Form siap diisi untuk **{str(nama_spg_manual).strip()}** di **{nama_warkop_manual}**")
 
@@ -2878,12 +3081,14 @@ else:
     if not is_inside_geofence:
         st.warning(f"🔒 Form input terkunci karena posisi GPS Anda berada di luar wilayah {st.session_state['kota_kab']}.")
     else:
-        st.info("ℹ️ Silakan pilih **Nama SPG** dan pastikan **Warkop/LKK** terpilih untuk membuka form.")
+        st.info("ℹ️ Silakan pilih **Nama SPG** untuk membuka form.")
 
 st.markdown("---")
 st.markdown(f"### 📈 Evaluasi Harian & Log Rekap: {st.session_state['user_spg']} ({st.session_state['kota_kab']})")
 
 df_master_all = load_database()
+df_sup_all_eval = load_supervisi_database()
+
 if not df_master_all.empty and "Promotor" in df_master_all.columns:
     df_user_rekap = df_master_all[df_master_all["Promotor"] == st.session_state["user_spg"]].copy()
 else:
@@ -2894,14 +3099,32 @@ if not df_user_rekap.empty:
     df_user_rekap["Tanggal"] = df_user_rekap["Waktu_Dt"].dt.strftime("%d-%m-%Y")
     df_user_rekap = add_custom_week_columns(df_user_rekap, "Waktu_Dt")
     df_user_rekap["Nama_SPG"] = df_user_rekap["Nama_SPG"].fillna("-")
+    df_user_rekap["Jumlah_Bungkus"] = pd.to_numeric(df_user_rekap["Jumlah_Bungkus"], errors="coerce").fillna(0)
 
     all_weeks_user = sorted(df_user_rekap["Periode_Minggu"].dropna().unique().tolist(), reverse=True)
     selected_user_weeks = st.multiselect("Filter Periode Minggu (Evaluasi Anda)", options=all_weeks_user, default=all_weeks_user, key="spg_user_week_filter")
 
     if selected_user_weeks:
-        df_user_rekap_filtered = df_user_rekap[df_user_rekap["Periode_Minggu"].isin(selected_user_weeks)]
+        df_user_rekap_filtered = df_user_rekap[df_user_rekap["Periode_Minggu"].isin(selected_user_weeks)].copy()
     else:
         df_user_rekap_filtered = df_user_rekap.copy()
+
+    # Hitung Kontak_Supervisi_Team per Tanggal (bersifat tim, tidak dipecah per SPG/brand)
+    team_contact_by_date = {}
+    if not df_sup_all_eval.empty and "Promotor" in df_sup_all_eval.columns:
+        df_sup_team_eval = df_sup_all_eval[
+            df_sup_all_eval["Promotor"].astype(str).str.strip().str.casefold()
+            == str(st.session_state["user_spg"]).strip().casefold()
+        ].copy()
+        if not df_sup_team_eval.empty:
+            df_sup_team_eval["Waktu_Dt"] = pd.to_datetime(df_sup_team_eval["Waktu"], errors="coerce")
+            df_sup_team_eval["Tanggal"] = df_sup_team_eval["Waktu_Dt"].dt.strftime("%d-%m-%Y")
+            df_sup_team_eval["Jumlah_Kontak_Manual"] = pd.to_numeric(
+                df_sup_team_eval["Jumlah_Kontak_Manual"], errors="coerce"
+            ).fillna(0).astype(int)
+            team_contact_by_date = (
+                df_sup_team_eval.groupby("Tanggal")["Jumlah_Kontak_Manual"].sum().to_dict()
+            )
 
     st.markdown("#### 📋 Tabel Evaluasi Harian Per SPG (Berdasarkan Target SPG)")
 
@@ -2931,6 +3154,11 @@ if not df_user_rekap.empty:
         .rename(columns={"Brand_Rokok_Clean": "Brand_Rokok"})
     )
 
+    # Kontak_Supervisi_Team merujuk ke kontak tim pada tanggal tersebut (tidak dipecah/digandakan per SPG atau brand)
+    df_eval_spg["Kontak_Supervisi_Team"] = df_eval_spg["Tanggal"].map(
+        lambda t: int(team_contact_by_date.get(t, 0))
+    )
+
     def get_spg_target(brand):
         return get_target_for_brand(brand, "target_spg", 25)
 
@@ -2940,7 +3168,18 @@ if not df_user_rekap.empty:
         axis=1
     )
 
-    cols_eval_order = ["Tanggal", "Periode_Minggu", "Nama_SPG", "Brand_Rokok", "Jumlah_Titik_Warkop", "Konsumen_Beli", "Jumlah_Omset_SPG", "Target_SPG", "Status_Target_SPG"]
+    cols_eval_order = [
+        "Tanggal",
+        "Periode_Minggu",
+        "Nama_SPG",
+        "Brand_Rokok",
+        "Jumlah_Titik_Warkop",
+        "Kontak_Supervisi_Team",
+        "Konsumen_Beli",
+        "Jumlah_Omset_SPG",
+        "Target_SPG",
+        "Status_Target_SPG",
+    ]
     df_eval_spg = df_eval_spg[[c for c in cols_eval_order if c in df_eval_spg.columns]]
 
     st.dataframe(df_eval_spg.style.map(style_status_target, subset=["Status_Target_SPG"]), use_container_width=True)
