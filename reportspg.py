@@ -1997,17 +1997,23 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                     + " (" + df_filtered_map["Jam_Label"] + ") - "
                     + df_filtered_map["Warkop_Label"]
                 )
+                df_filtered_map["Koordinat_Str"] = df_filtered_map.apply(
+                    lambda r: f"{r['Latitude']:.6f}, {r['Longitude']:.6f}", axis=1
+                )
+                df_filtered_map["Link_Google_Maps"] = df_filtered_map.apply(
+                    lambda r: f"https://www.google.com/maps/search/?api=1&query={r['Latitude']:.6f},{r['Longitude']:.6f}",
+                    axis=1,
+                )
 
-                # Palet warna RGB kontras untuk membedakan Tanggal atau Nama SPG
                 point_palette_rgba = [
-                    [234, 88, 12, 235],    # Oranye
-                    [37, 99, 235, 235],    # Biru
-                    [22, 163, 74, 235],    # Hijau
-                    [147, 51, 234, 235],   # Ungu
-                    [219, 39, 119, 235],   # Pink
-                    [13, 148, 136, 235],   # Teal
-                    [202, 138, 4, 235],    # Amber
-                    [71, 85, 105, 235],    # Slate
+                    [234, 88, 12, 235],
+                    [37, 99, 235, 235],
+                    [22, 163, 74, 235],
+                    [147, 51, 234, 235],
+                    [219, 39, 119, 235],
+                    [13, 148, 136, 235],
+                    [202, 138, 4, 235],
+                    [71, 85, 105, 235],
                 ]
                 point_palette_hex = [
                     "#EA580C", "#2563EB", "#16A34A", "#9333EA",
@@ -2019,19 +2025,16 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                     cat_to_idx = {cat: idx % len(point_palette_rgba) for idx, cat in enumerate(categories)}
                     df_filtered_map["_color_idx"] = df_filtered_map["Tanggal"].fillna("-").astype(str).map(cat_to_idx)
                     df_filtered_map["Titik_Color"] = df_filtered_map["_color_idx"].apply(lambda i: point_palette_rgba[i])
-                    df_filtered_map["Legend_Key"] = df_filtered_map["Tanggal"].fillna("-").astype(str)
                 elif mode_warna_titik == "Per Nama SPG":
                     categories = sorted(df_filtered_map["Nama_SPG"].fillna("-").astype(str).unique().tolist())
                     cat_to_idx = {cat: idx % len(point_palette_rgba) for idx, cat in enumerate(categories)}
                     df_filtered_map["_color_idx"] = df_filtered_map["Nama_SPG"].fillna("-").astype(str).map(cat_to_idx)
                     df_filtered_map["Titik_Color"] = df_filtered_map["_color_idx"].apply(lambda i: point_palette_rgba[i])
-                    df_filtered_map["Legend_Key"] = df_filtered_map["Nama_SPG"].fillna("-").astype(str)
                 else:
                     categories = ["Semua Titik"]
                     cat_to_idx = {"Semua Titik": 0}
                     df_filtered_map["_color_idx"] = 0
                     df_filtered_map["Titik_Color"] = [point_palette_rgba[0]] * len(df_filtered_map)
-                    df_filtered_map["Legend_Key"] = "Semua Titik"
 
                 koordinat_rute = df_filtered_map[["Longitude", "Latitude"]].values.tolist()
                 center_lat = float(df_filtered_map["Latitude"].mean())
@@ -2092,6 +2095,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                             "<b>Plat Mobil:</b> {Plat_Mobil}<br/>"
                             "<b>Warkop / LKK:</b> {Warkop_LKK}<br/>"
                             "<b>Brand:</b> {Brand_Rokok} ({Jumlah_Bungkus} bks)<br/>"
+                            "<b>Koordinat:</b> {Koordinat_Str}<br/>"
                             "<b>Waktu Lengkap:</b> {Waktu}"
                         ),
                         "style": {"backgroundColor": "#0F172A", "color": "white"},
@@ -2113,6 +2117,27 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                         unsafe_allow_html=True,
                     )
 
+                # Tombol cepat buka Google Maps untuk titik terpilih
+                st.markdown("#### 🔗 Buka Titik di Google Maps")
+                option_map = {
+                    f"#{row['Urutan']} | {row['Tanggal']} {row['Jam_Label']} | {row['Warkop_LKK']} ({row['Koordinat_Str']})": row["Link_Google_Maps"]
+                    for _, row in df_filtered_map.iterrows()
+                }
+                col_pick_gmap, col_btn_gmap = st.columns([0.65, 0.35])
+                with col_pick_gmap:
+                    selected_point_label = st.selectbox(
+                        "Pilih titik kunjungan",
+                        options=list(option_map.keys()),
+                        key="peta_pilih_titik_gmap",
+                    )
+                with col_btn_gmap:
+                    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                    st.link_button(
+                        "📍 Buka Google Maps",
+                        url=option_map[selected_point_label],
+                        use_container_width=True,
+                    )
+
                 st.markdown("#### 🧭 Urutan Titik Kunjungan Terfilter")
                 df_urutan_view = df_filtered_map[
                     [
@@ -2126,9 +2151,21 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                         "Warkop_LKK",
                         "Brand_Rokok",
                         "Jumlah_Bungkus",
+                        "Koordinat_Str",
+                        "Link_Google_Maps",
                     ]
-                ].rename(columns={"Jam_Label": "Jam"})
-                st.dataframe(df_urutan_view, use_container_width=True, hide_index=True)
+                ].rename(columns={"Jam_Label": "Jam", "Koordinat_Str": "Koordinat"})
+                st.dataframe(
+                    df_urutan_view,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Link_Google_Maps": st.column_config.LinkColumn(
+                            "Google Maps",
+                            display_text="Buka Maps 📍",
+                        )
+                    },
+                )
             else:
                 st.warning("Tidak ada data koordinat yang cocok dengan filter yang dipilih.")
         else:
