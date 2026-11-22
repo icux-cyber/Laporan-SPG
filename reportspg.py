@@ -2445,53 +2445,94 @@ else:
 
 st.markdown('<div class="section-title">📍 Titik Kunjungan Lapangan</div>', unsafe_allow_html=True)
 with st.container(border=True):
-    kecamatan_pilihan = st.selectbox(
-        f"Kecamatan Tujuan ({st.session_state['kota_kab']})",
-        options=daftar_kecamatan_terjadwal,
-        help="Kecamatan difilter otomatis sesuai penugasan jadwal hari ini yang dikelola di menu admin.",
-    )
+    active_spg_points = []
+    if st.session_state["login_mode"] == "Supervisi":
+        active_spg_points = get_active_spg_points_today(
+            team_name=st.session_state["user_spg"],
+            fallback_kota=st.session_state.get("kota_kab", ""),
+        )
 
-    df_master_excel = load_master_lokasi_excel()
-    filtered_df_warkop = pd.DataFrame()
-
-    if not df_master_excel.empty:
-        col_kec_excel = next((c for c in df_master_excel.columns if "kec" in c.lower() or "wilayah" in c.lower()), None)
-        col_warkop_excel = next((c for c in df_master_excel.columns if "warkop" in c.lower() or "lkk" in c.lower() or "nama" in c.lower()), None)
-        col_alamat_excel = next((c for c in df_master_excel.columns if "alamat" in c.lower() or "address" in c.lower()), None)
-
-        if col_kec_excel and col_warkop_excel:
-            mask = (
-                df_master_excel[col_kec_excel].astype(str).str.strip().str.lower()
-                == str(kecamatan_pilihan).strip().lower()
-            )
-            filtered_df_warkop = df_master_excel[mask]
-            if filtered_df_warkop.empty:
-                filtered_df_warkop = df_master_excel.copy()
-
-        if not filtered_df_warkop.empty and col_warkop_excel:
-            filtered_warkop_list = filtered_df_warkop[col_warkop_excel].dropna().unique().tolist()
-        else:
-            filtered_warkop_list = ["Warkop Alternatif 1", "Warkop Alternatif 2"]
-    else:
-        filtered_warkop_list = ["Warkop Alternatif 1", "Warkop Alternatif 2"]
-
-    if not filtered_warkop_list:
-        filtered_warkop_list = ["Warkop Alternatif 1", "Warkop Alternatif 2"]
-
-    nama_warkop_manual = st.selectbox(
-        f"Warkop / LKK di {kecamatan_pilihan}",
-        options=filtered_warkop_list,
-        help="Daftar warkop difilter otomatis dari Master WarkopLKK.xlsx",
-    )
-
-    alamat_warkop_terpilih = "-"
-    if not df_master_excel.empty and col_warkop_excel and col_alamat_excel:
-        match_row = df_master_excel[
-            df_master_excel[col_warkop_excel].astype(str).str.strip() == str(nama_warkop_manual).strip()
+    if st.session_state["login_mode"] == "Supervisi" and active_spg_points:
+        point_labels = [
+            f"{p['warkop']} ({p['kecamatan']}) — {p['spg'] or 'SPG'} [{p['waktu']}]"
+            for p in active_spg_points
         ]
-        if not match_row.empty:
-            alamat_warkop_terpilih = str(match_row.iloc[0][col_alamat_excel])
+        col_sync_1, col_sync_2 = st.columns([0.78, 0.22])
+        with col_sync_1:
+            selected_point_label = st.selectbox(
+                "🔗 Titik Aktif SPG Hari Ini",
+                options=point_labels,
+                index=0,
+                help="Titik otomatis diambil dari input SPG hari ini (urutan terbaru di paling atas).",
+            )
+        with col_sync_2:
+            st.markdown("<div style='height: 26px;'></div>", unsafe_allow_html=True)
+            if st.button("🔄 Refresh", key="btn_refresh_spg_points", use_container_width=True):
+                st.rerun()
 
+        selected_point = active_spg_points[point_labels.index(selected_point_label)]
+        kecamatan_pilihan = selected_point["kecamatan"] or (
+            daftar_kecamatan_terjadwal[0] if daftar_kecamatan_terjadwal else "Kecamatan Umum"
+        )
+        nama_warkop_manual = selected_point["warkop"]
+        alamat_warkop_terpilih = selected_point["alamat"]
+    else:
+        kecamatan_pilihan = st.selectbox(
+            f"Kecamatan Tujuan ({st.session_state['kota_kab']})",
+            options=daftar_kecamatan_terjadwal,
+            help="Kecamatan difilter otomatis sesuai penugasan jadwal hari ini yang dikelola di menu admin.",
+        )
+
+        df_master_excel = load_master_lokasi_excel()
+        filtered_df_warkop = pd.DataFrame()
+        filtered_warkop_list = []
+        col_kec_excel = None
+        col_warkop_excel = None
+        col_alamat_excel = None
+
+        if not df_master_excel.empty:
+            col_kec_excel = next(
+                (c for c in df_master_excel.columns if "kec" in c.lower() or "wilayah" in c.lower()),
+                None,
+            )
+            col_warkop_excel = next(
+                (c for c in df_master_excel.columns if "warkop" in c.lower() or "lkk" in c.lower() or "nama" in c.lower()),
+                None,
+            )
+            col_alamat_excel = next(
+                (c for c in df_master_excel.columns if "alamat" in c.lower() or "address" in c.lower()),
+                None,
+            )
+
+            if col_kec_excel and col_warkop_excel:
+                mask = (
+                    df_master_excel[col_kec_excel].astype(str).str.strip().str.lower()
+                    == str(kecamatan_pilihan).strip().lower()
+                )
+                filtered_df_warkop = df_master_excel[mask]
+                if filtered_df_warkop.empty:
+                    filtered_df_warkop = df_master_excel.copy()
+                filtered_warkop_list = filtered_df_warkop[col_warkop_excel].dropna().unique().tolist()
+
+        if not filtered_warkop_list:
+            filtered_warkop_list = ["Warkop Alternatif 1", "Warkop Alternatif 2"]
+
+        nama_warkop_manual = st.selectbox(
+            f"Warkop / LKK di {kecamatan_pilihan}",
+            options=filtered_warkop_list,
+            help="Daftar warkop difilter otomatis dari Master WarkopLKK.xlsx",
+        )
+        alamat_warkop_terpilih = "-"
+        if not df_master_excel.empty and col_warkop_excel and col_alamat_excel:
+            match_row = df_master_excel[
+                df_master_excel[col_warkop_excel].astype(str).str.strip() == str(nama_warkop_manual).strip()
+            ]
+            if not match_row.empty:
+                alamat_warkop_terpilih = str(match_row.iloc[0][col_alamat_excel])
+
+        if st.session_state["login_mode"] == "Supervisi":
+            st.info("⏳ Belum ada input titik Warkop dari SPG hari ini; sementara memakai daftar master lokasi.")
+            
     st.markdown(f"""
     <div class="address-box">
         📍 <b>Alamat:</b> {alamat_warkop_terpilih}
