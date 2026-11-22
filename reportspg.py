@@ -1,22 +1,21 @@
 from datetime import date, datetime, timedelta
 from io import BytesIO
 import json
-import requests
 import os
 import tempfile
 import geopandas as gpd
 import pandas as pd
 import pydeck as pdk
+import requests
 from shapely.geometry import Point
 import streamlit as st
 from streamlit_js_eval import get_geolocation
 
+from schedule_entry import SCHEDULE_DETAIL_FILE, get_scheduled_vehicles, render_schedule_entry
 from team_brand_sync import (
     match_brands_by_team_name,
     resolve_team_allowed_brands,
 )
-
-from schedule_entry import SCHEDULE_DETAIL_FILE, get_scheduled_vehicles, render_schedule_entry
 
 # ====================================================
 # KONFIGURASI HALAMAN STREAMLIT
@@ -302,6 +301,7 @@ EXPECTED_SUPERVISI_COLUMNS = [
     "Jumlah_Kontak_Manual",
 ]
 
+
 def df_to_sheet_rows(df: pd.DataFrame):
     if df is None:
         return []
@@ -325,6 +325,7 @@ def df_to_sheet_rows(df: pd.DataFrame):
 
     return [columns] + rows
 
+
 def google_json_default(value):
     if isinstance(value, (datetime, date)):
         return value.isoformat()
@@ -332,6 +333,7 @@ def google_json_default(value):
     if callable(item):
         return item()
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
 
 def sheet_rows_to_df(rows, expected_columns=None):
     if not rows:
@@ -345,6 +347,7 @@ def sheet_rows_to_df(rows, expected_columns=None):
                 df[column] = ""
         return df[expected_columns]
     return df
+
 
 def post_google_sheet(payload):
     payload_json = json.dumps(payload, ensure_ascii=False, default=google_json_default)
@@ -375,6 +378,7 @@ def post_google_sheet(payload):
     if not isinstance(result, dict):
         raise RuntimeError("Format respons Google Apps Script tidak valid.")
     return result
+
 
 def load_supabase_backup_data():
     df_rekap = pd.read_csv(DB_FILE) if os.path.exists(DB_FILE) else pd.DataFrame(columns=EXPECTED_COLUMNS)
@@ -407,6 +411,7 @@ def load_supabase_backup_data():
         },
     }
 
+
 def get_supabase_config():
     try:
         supabase_url = st.secrets.get("SUPABASE_URL", os.environ.get("SUPABASE_URL"))
@@ -421,6 +426,7 @@ def get_supabase_config():
         )
 
     return supabase_url.rstrip("/"), supabase_key
+
 
 def post_supabase_backup(snapshot):
     supabase_url, supabase_key = get_supabase_config()
@@ -441,6 +447,7 @@ def post_supabase_backup(snapshot):
         raise RuntimeError(
             f"Supabase mengembalikan HTTP {response.status_code}: {response.text[:500]}"
         ) from exc
+
 
 def get_latest_supabase_backup():
     supabase_url, supabase_key = get_supabase_config()
@@ -476,6 +483,7 @@ def get_latest_supabase_backup():
     if not isinstance(backups[0], dict) or not isinstance(backups[0].get("data"), dict):
         raise RuntimeError("Isi backup terbaru di Supabase tidak valid.")
     return backups[0]
+
 
 def restore_supabase_backup(snapshot):
     if not isinstance(snapshot, dict) or snapshot.get("backup_version") != 1:
@@ -548,6 +556,7 @@ def restore_supabase_backup(snapshot):
         for staged_path in staged_files.values():
             if os.path.exists(staged_path):
                 os.remove(staged_path)
+
 
 def render_google_sheet_backup_controls():
     with st.expander("☁️ Backup & Load Data", expanded=False):
@@ -651,6 +660,7 @@ def render_google_sheet_backup_controls():
             except Exception as e:
                 st.error(f"Error load: {e}")
 
+
 # ====================================================
 # FUNGSI BANTUAN UMUM
 # ====================================================
@@ -658,6 +668,7 @@ def normalize_text(value):
     if pd.isna(value):
         return ""
     return str(value).strip()
+
 
 def get_custom_week_info(dt):
     if pd.isna(dt):
@@ -676,6 +687,7 @@ def get_custom_week_info(dt):
     periode_label = f"Minggu ke-{iso_w}"
     return periode_label, iso_w
 
+
 def add_custom_week_columns(df, date_col="Waktu_Dt"):
     if df.empty or date_col not in df.columns:
         df["Periode_Minggu"] = "-"
@@ -686,6 +698,7 @@ def add_custom_week_columns(df, date_col="Waktu_Dt"):
         periods.append(p_label)
     df["Periode_Minggu"] = periods
     return df
+
 
 # ====================================================
 # DATABASE TRANSAKSI & SUPERVISI
@@ -704,8 +717,10 @@ def load_database():
             return pd.DataFrame(columns=EXPECTED_COLUMNS)
     return pd.DataFrame(columns=EXPECTED_COLUMNS)
 
+
 def save_database(df):
     df.to_csv(DB_FILE, index=False)
+
 
 def load_supervisi_database():
     if os.path.exists(DB_SUPERVISI_KONTAK_FILE):
@@ -719,8 +734,69 @@ def load_supervisi_database():
             return pd.DataFrame(columns=EXPECTED_SUPERVISI_COLUMNS)
     return pd.DataFrame(columns=EXPECTED_SUPERVISI_COLUMNS)
 
+
 def save_supervisi_database(df):
     df.to_csv(DB_SUPERVISI_KONTAK_FILE, index=False)
+
+
+def get_active_spg_points_today(team_name: str, fallback_kota: str = "", fallback_kec: str = "") -> list[dict]:
+    """
+    Mengambil daftar titik unik (Warkop_LKK) yang sudah diinput SPG untuk team tertentu
+    pada hari ini (WIB), diurutkan dari input paling baru ke yang lebih awal.
+    """
+    df_spg = load_database()
+    if df_spg is None or df_spg.empty:
+        return []
+
+    today_str = (datetime.utcnow() + timedelta(hours=7)).strftime("%Y-%m-%d")
+    mask = (
+        df_spg["Promotor"].astype(str).str.strip().str.casefold()
+        == str(team_name or "").strip().casefold()
+    ) & (
+        df_spg["Waktu"].astype(str).str.startswith(today_str)
+    )
+    if fallback_kota:
+        mask = mask & (
+            df_spg["Kota_Kab"].astype(str).str.strip().str.casefold()
+            == str(fallback_kota).strip().casefold()
+        )
+    if fallback_kec:
+        mask = mask & (
+            df_spg["Kecamatan"].astype(str).str.strip().str.casefold()
+            == str(fallback_kec).strip().casefold()
+        )
+
+    df_today = df_spg[mask].copy()
+    if df_today.empty:
+        return []
+
+    parsed_time = pd.to_datetime(df_today["Waktu"], errors="coerce")
+    if parsed_time.notna().any():
+        df_today = df_today.assign(_dt=parsed_time).sort_values("_dt", ascending=False)
+    else:
+        df_today = df_today.iloc[::-1]
+
+    points = []
+    seen_warkop = set()
+    for _, row in df_today.iterrows():
+        warkop = str(row.get("Warkop_LKK", "") or "").strip()
+        if not warkop:
+            continue
+        norm_key = warkop.casefold()
+        if norm_key in seen_warkop:
+            continue
+        seen_warkop.add(norm_key)
+        points.append({
+            "kota": str(row.get("Kota_Kab", fallback_kota) or fallback_kota).strip(),
+            "kecamatan": str(row.get("Kecamatan", fallback_kec) or fallback_kec).strip(),
+            "warkop": warkop,
+            "alamat": str(row.get("Alamat_Warkop", "-") or "-").strip() or "-",
+            "waktu": str(row.get("Waktu", "") or "").strip(),
+            "spg": str(row.get("Nama_SPG", "") or "").strip(),
+        })
+
+    return points
+
 
 # ====================================================
 # MASTER WILAYAH / GEOJSON
@@ -745,6 +821,7 @@ def load_master_wilayah(kota):
         st.error(f"Gagal memuat file master wilayah '{filename}': {e}")
         return None
 
+
 # ====================================================
 # MASTER BRAND / TARGET / TEAM / PLAT / NAMA TEAM
 # ====================================================
@@ -760,6 +837,7 @@ DEFAULT_BRANDS = [
 ]
 DEFAULT_SPGS = ["Nanda"]
 DEFAULT_PLATS = ["L 1234 ABC"]
+
 
 def load_master_team_names():
     default_teams = {f"Team SPG {i}": f"Team SPG {i}" for i in range(1, 21)}
@@ -781,6 +859,7 @@ def load_master_team_names():
     else:
         save_master_team_names(default_teams)
         return default_teams
+
 
 def save_master_team_names(team_names_dict):
     active_names = [str(name).strip() for name in team_names_dict.values() if str(name).strip()]
@@ -806,6 +885,7 @@ def save_master_team_names(team_names_dict):
         st.error(f"Gagal menyimpan master nama team: {e}")
         return False
 
+
 def load_master_brands():
     if os.path.exists(MASTER_BRAND_FILE):
         try:
@@ -815,6 +895,7 @@ def load_master_brands():
             return DEFAULT_BRANDS
     return DEFAULT_BRANDS
 
+
 def save_master_brands(brands):
     try:
         with open(MASTER_BRAND_FILE, "w", encoding="utf-8") as f:
@@ -823,6 +904,7 @@ def save_master_brands(brands):
     except Exception as e:
         st.error(f"Gagal menyimpan file master_brand_rokok.json: {e}")
         return False
+
 
 def load_master_team_brands():
     current_brands = load_master_brands()
@@ -849,6 +931,7 @@ def load_master_team_brands():
         save_master_team_brands(default_teams)
         return default_teams
 
+
 def save_master_team_brands(team_brands):
     try:
         cleaned_data = {
@@ -861,6 +944,7 @@ def save_master_team_brands(team_brands):
     except Exception as e:
         st.error(f"❌ Gagal menyimpan ke `{MASTER_TEAM_BRAND_FILE}`: {e}")
         return False
+
 
 def load_master_plat_kendaraan():
     if os.path.exists(MASTER_PLAT_FILE):
@@ -875,9 +959,11 @@ def load_master_plat_kendaraan():
             return DEFAULT_PLATS
     return DEFAULT_PLATS
 
+
 def save_master_plat_kendaraan(plat_list):
     with open(MASTER_PLAT_FILE, "w", encoding="utf-8") as f:
         json.dump(plat_list, f, ensure_ascii=False, indent=2)
+
 
 def load_master_lokasi_excel():
     if os.path.exists(MASTER_LOKASI_FILE):
@@ -897,6 +983,7 @@ def load_master_lokasi_excel():
             ],
         )
 
+
 def save_master_lokasi_excel(df_excel):
     try:
         df_excel.to_excel(MASTER_LOKASI_FILE, index=False)
@@ -904,6 +991,7 @@ def save_master_lokasi_excel(df_excel):
     except Exception as e:
         st.error(f"Gagal menyimpan file Excel: {e}")
         return False
+
 
 def load_master_spgs():
     if os.path.exists(MASTER_SPG_FILE):
@@ -914,9 +1002,11 @@ def load_master_spgs():
             return DEFAULT_SPGS
     return DEFAULT_SPGS
 
+
 def save_master_spgs(spgs):
     with open(MASTER_SPG_FILE, "w", encoding="utf-8") as f:
         json.dump(spgs, f, ensure_ascii=False, indent=2)
+
 
 # ====================================================
 # JADWAL SPG
@@ -932,6 +1022,7 @@ def load_jadwal_spg():
             return pd.DataFrame()
     return pd.DataFrame()
 
+
 def save_jadwal_spg(df):
     try:
         df.to_excel(JADWAL_SPG_FILE, index=False)
@@ -939,6 +1030,7 @@ def save_jadwal_spg(df):
     except Exception as e:
         st.error(f"Gagal menyimpan file Jadwal SPG {JADWAL_SPG_FILE}: {e}")
         return False
+
 
 def _is_same_team_reference(team_cell, team_name):
     team_cell = normalize_text(team_cell).lower()
@@ -950,6 +1042,7 @@ def _is_same_team_reference(team_cell, team_name):
         return True
 
     return False
+
 
 def get_schedule_info_for_team(team_name):
     df_j = load_jadwal_spg()
@@ -996,6 +1089,7 @@ def get_schedule_info_for_team(team_name):
 
     return True, "", found_kota, kec_list, pd.DataFrame(matched_rows)
 
+
 # ====================================================
 # TARGET BRAND PER SPG / TEAM
 # ====================================================
@@ -1021,6 +1115,7 @@ TARGET_GROUP_OPTIONS = {
     "Black_Matcha": TARGET_GROUP_LABELS["Black_Matcha"],
 }
 
+
 def load_target_rules():
     if os.path.exists(MASTER_TARGET_FILE):
         try:
@@ -1030,14 +1125,18 @@ def load_target_rules():
             return DEFAULT_TARGET_RULES
     return DEFAULT_TARGET_RULES
 
+
 def save_target_rules(rules):
     with open(MASTER_TARGET_FILE, "w", encoding="utf-8") as f:
         json.dump(rules, f, ensure_ascii=False, indent=2)
 
+
 TARGET_RULES = load_target_rules()
+
 
 def normalize_brand_key(brand):
     return "".join(str(brand).casefold().split())
+
 
 def get_brand_target_rule(brand):
     brand_key = normalize_brand_key(brand)
@@ -1046,15 +1145,18 @@ def get_brand_target_rule(brand):
         {},
     )
 
+
 def clean_brand_target_name(brand):
     group = get_brand_target_rule(brand).get("group")
     return TARGET_GROUP_LABELS.get(group, brand)
+
 
 def get_group_target(group_name, target_key, default_val):
     for brand, rule in TARGET_RULES.items():
         if rule.get("group") == group_name and target_key in rule:
             return rule[target_key]
     return default_val
+
 
 def get_target_for_brand(brand, target_key, default_val):
     rule = get_brand_target_rule(brand)
@@ -1063,12 +1165,14 @@ def get_target_for_brand(brand, target_key, default_val):
         return get_group_target(group, target_key, default_val)
     return rule.get(target_key, default_val)
 
+
 def style_status_target(val):
     if val == "Not Achieved":
         return "color: #DC2626; font-weight: 700;"
     elif val == "Achieved":
         return "color: #16A34A; font-weight: 700;"
     return ""
+
 
 # ====================================================
 # SESSION STATE
@@ -1081,6 +1185,7 @@ def reset_session_on_user_change():
     st.session_state["draft_ig"] = ""
     st.session_state["draft_bungkus"] = 1
     st.session_state["draft_bumo"] = ""
+
 
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
@@ -2339,7 +2444,6 @@ if not st.session_state["logged_in"]:
                 st.session_state["plat_mobil"] = spg_vehicles[0] if len(spg_vehicles) == 1 else "-"
                 st.session_state["kota_kab"] = auto_detected_kota
                 st.rerun()
-                
 
     st.markdown(
         """
@@ -2532,7 +2636,7 @@ with st.container(border=True):
 
         if st.session_state["login_mode"] == "Supervisi":
             st.info("⏳ Belum ada input titik Warkop dari SPG hari ini; sementara memakai daftar master lokasi.")
-            
+
     st.markdown(f"""
     <div class="address-box">
         📍 <b>Alamat:</b> {alamat_warkop_terpilih}
