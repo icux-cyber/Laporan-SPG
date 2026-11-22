@@ -1,3 +1,8 @@
+from team_brand_sync import (
+    resolve_team_allowed_brands,
+    sync_masters_from_schedule_upload,
+)
+
 import json
 import re
 from datetime import date, timedelta
@@ -123,21 +128,17 @@ def save_team_names_from_schedule(team_names):
 
 def brands_for_team(team):
     all_brands = read_json(BRANDS_FILE, DEFAULT_BRANDS)
-    if not isinstance(all_brands, list):
+    if not isinstance(all_brands, list) or not all_brands:
         all_brands = DEFAULT_BRANDS
     allocations = read_json(TEAM_BRANDS_FILE, {})
-    if not isinstance(allocations, dict):
-        allocations = {}
-    selected = allocations.get(team)
-    if selected is None:
-        for canonical, alias in team_mapping().items():
-            if alias == team:
-                selected = allocations.get(canonical)
-                if selected is not None:
-                    break
-    if not isinstance(selected, list) or not selected:
-        selected = all_brands
-    return [str(brand) for brand in selected if str(brand) in all_brands] or all_brands
+    names_map = team_mapping()
+    return resolve_team_allowed_brands(
+        team_name=team,
+        all_brands=all_brands,
+        team_brands_map=allocations if isinstance(allocations, dict) else {},
+        team_names_map=names_map,
+        prefer_keyword_match=True,
+    )
 
 
 def vehicle_choices():
@@ -968,18 +969,33 @@ def render_schedule_entry():
                                 saved = saved.copy() if isinstance(saved, dict) else {}
                                 saved["team"] = str(team).strip()
                                 saved["vehicle"] = uploaded_vehicles[key]
-                                saved.setdefault("brands", [])
+                                if not saved.get("brands"):
+                                    saved["brands"] = brands_for_team(saved["team"])
                                 updated_details[key] = saved
                     if save_schedule(upload_frame):
                         if save_details(updated_details):
-                            if save_team_names_from_schedule(uploaded_team_names):
+                            sync_ok, sync_info = sync_masters_from_schedule_upload(
+                                uploaded_team_names=uploaded_team_names,
+                                uploaded_vehicles=uploaded_vehicles,
+                                team_names_file=TEAM_NAMES_FILE,
+                                team_brands_file=TEAM_BRANDS_FILE,
+                                vehicles_file=VEHICLES_FILE,
+                                brands_file=BRANDS_FILE,
+                            )
+                            if sync_ok:
+                                added_plats = sync_info.get("added_vehicles", [])
+                                plat_msg = (
+                                    f" serta {len(added_plats)} plat kendaraan baru ditambahkan ke Master Plat"
+                                    if added_plats
+                                    else ""
+                                )
                                 st.success(
                                     f"Jadwal berhasil diperbarui. {len(uploaded_team_names)} nama team "
-                                    "diisi berurutan pada Master Data: Nama Team."
+                                    f"dan alokasi brand otomatis disinkronkan{plat_msg}."
                                 )
                                 st.rerun()
                             st.error(
-                                "Jadwal berhasil diperbarui, tetapi Master Nama Team gagal disinkronkan."
+                                f"Jadwal berhasil diperbarui, tetapi sinkronisasi master gagal: {sync_info.get('error', '')}"
                             )
                         else:
                             st.error(
