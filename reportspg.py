@@ -412,6 +412,61 @@ EXPECTED_SUPERVISI_COLUMNS = [
     "Jumlah_Kontak_Manual",
 ]
 
+LOCKED_LKK_POINT_FILE = "titik_lkk_aktif_team.json"
+
+
+def load_locked_lkk_points() -> dict:
+    if os.path.exists(LOCKED_LKK_POINT_FILE):
+        try:
+            with open(LOCKED_LKK_POINT_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def save_locked_lkk_point(team_name: str, point_info: dict) -> bool:
+    today_str = (datetime.utcnow() + timedelta(hours=7)).strftime("%Y-%m-%d")
+    all_locked = load_locked_lkk_points()
+    key = str(team_name or "").strip().casefold()
+    payload = dict(point_info)
+    payload["tanggal"] = today_str
+    payload["locked_at"] = (datetime.utcnow() + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
+    all_locked[key] = payload
+    try:
+        with open(LOCKED_LKK_POINT_FILE, "w", encoding="utf-8") as f:
+            json.dump(all_locked, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        st.error(f"Gagal menyimpan titik LKK aktif: {e}")
+        return False
+
+
+def get_active_locked_lkk_point_today(team_name: str, fallback_kota: str = "") -> dict | None:
+    """Mengambil titik LKK yang sudah di-save / di-lock oleh Supervisi untuk team hari ini (WIB)."""
+    today_str = (datetime.utcnow() + timedelta(hours=7)).strftime("%Y-%m-%d")
+    all_locked = load_locked_lkk_points()
+    key = str(team_name or "").strip().casefold()
+    entry = all_locked.get(key)
+    if not isinstance(entry, dict):
+        return None
+    if str(entry.get("tanggal", "")).strip() != today_str:
+        return None
+    warkop = str(entry.get("warkop", "") or "").strip()
+    if not warkop:
+        return None
+    kota = str(entry.get("kota", fallback_kota) or fallback_kota).strip()
+    if fallback_kota and kota and kota.casefold() != str(fallback_kota).strip().casefold():
+        return None
+    return {
+        "kota": kota,
+        "kecamatan": str(entry.get("kecamatan", "") or "").strip(),
+        "warkop": warkop,
+        "alamat": str(entry.get("alamat", "-") or "-").strip() or "-",
+        "locked_at": str(entry.get("locked_at", "") or "").strip(),
+    }
+
 
 def df_to_sheet_rows(df: pd.DataFrame):
     if df is None:
@@ -2705,17 +2760,16 @@ else:
     daftar_kecamatan_terjadwal = sorted(set(daftar_kecamatan_terjadwal))
 
 # ====================================================
-# TITIK KUNJUNGAN LAPANGAN (SINKRON DENGAN SUPERVISI)
+# TITIK KUNJUNGAN LAPANGAN (LOCK TITIK LKK OLEH SUPERVISI)
 # ====================================================
 st.markdown('<div class="section-title">📍 Titik Kunjungan Lapangan</div>', unsafe_allow_html=True)
 with st.container(border=True):
     df_sup_today_all = load_supervisi_database()
-    latest_sup_point = get_latest_supervisi_point_today(
+    locked_point_today = get_active_locked_lkk_point_today(
         team_name=st.session_state["user_spg"],
         fallback_kota=st.session_state.get("kota_kab", ""),
-        df_sup=df_sup_today_all,
     )
-    sup_points_today = get_supervisi_points_today(
+    latest_sup_contact = get_latest_supervisi_point_today(
         team_name=st.session_state["user_spg"],
         fallback_kota=st.session_state.get("kota_kab", ""),
         df_sup=df_sup_today_all,
@@ -2738,21 +2792,29 @@ with st.container(border=True):
     if st.session_state["login_mode"] == "Supervisi":
         col_sync_1, col_sync_2 = st.columns([0.78, 0.22])
         with col_sync_1:
-            if latest_sup_point:
+            if locked_point_today:
                 st.success(
-                    f"🔗 **Titik Aktif Tim Hari Ini:** **{latest_sup_point['warkop']}** "
-                    f"({latest_sup_point['kecamatan']}) • Kontak Tim: **{latest_sup_point['kontak']}**"
+                    f"🔒 **Titik LKK Terkunci Hari Ini:** **{locked_point_today['warkop']}** "
+                    f"({locked_point_today['kecamatan']}) • SPG sudah diizinkan menginput di titik ini."
                 )
             else:
-                st.info("ℹ️ Pilih Kecamatan & Warkop/LKK di bawah, lalu simpan jumlah kontak agar titik aktif tersinkronisasi ke report & tim.")
+                st.warning(
+                    "⚠️ **Titik LKK Belum Di-Save / Di-Lock.** Pilih Kecamatan & Warkop/LKK di bawah, "
+                    "lalu klik **🔒 Save Titik LKK** agar SPG dapat mulai menginput."
+                )
         with col_sync_2:
             st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
             if st.button("🔄 Refresh", key="btn_refresh_sup_points", use_container_width=True):
                 st.rerun()
 
+        default_kec_idx = 0
+        if locked_point_today and locked_point_today.get("kecamatan") in daftar_kecamatan_terjadwal:
+            default_kec_idx = daftar_kecamatan_terjadwal.index(locked_point_today["kecamatan"])
+
         kecamatan_pilihan = st.selectbox(
             f"Kecamatan Tujuan ({st.session_state['kota_kab']})",
             options=daftar_kecamatan_terjadwal,
+            index=default_kec_idx,
             help="Kecamatan difilter otomatis sesuai penugasan jadwal hari ini yang dikelola di menu admin.",
         )
 
@@ -2770,9 +2832,14 @@ with st.container(border=True):
         if not filtered_warkop_list:
             filtered_warkop_list = ["Warkop Alternatif 1", "Warkop Alternatif 2"]
 
+        default_w_idx = 0
+        if locked_point_today and locked_point_today.get("warkop") in filtered_warkop_list:
+            default_w_idx = filtered_warkop_list.index(locked_point_today["warkop"])
+
         nama_warkop_manual = st.selectbox(
             f"Warkop / LKK di {kecamatan_pilihan}",
             options=filtered_warkop_list,
+            index=default_w_idx,
             help="Daftar warkop difilter otomatis dari Master WarkopLKK.xlsx",
         )
         alamat_warkop_terpilih = "-"
@@ -2782,91 +2849,108 @@ with st.container(border=True):
             ]
             if not match_row.empty:
                 alamat_warkop_terpilih = str(match_row.iloc[0][col_alamat_excel])
+
+        # SAVE #1: Save untuk me-lock Titik LKK
+        if st.button("🔒 Save Titik LKK (Buka Akses Input SPG)", type="primary", use_container_width=True, key="btn_save_lock_lkk"):
+            saved_lock = save_locked_lkk_point(
+                team_name=st.session_state["user_spg"],
+                point_info={
+                    "kota": st.session_state["kota_kab"],
+                    "kecamatan": str(kecamatan_pilihan).strip(),
+                    "warkop": str(nama_warkop_manual).strip(),
+                    "alamat": alamat_warkop_terpilih,
+                },
+            )
+            if saved_lock:
+                st.success(
+                    f"✅ Titik LKK **{str(nama_warkop_manual).strip()}** ({kecamatan_pilihan}) berhasil di-save & di-lock! "
+                    "SPG kini dapat menginput laporan di titik ini."
+                )
+                st.rerun()
     else:
-        # Mode SPG: tetap bisa langsung isi form kapan saja tanpa menunggu Supervisi,
-        # namun titik LKK yang tersinkronisasi mengikuti titik terbaru yang sudah diinput Supervisi hari ini.
+        # Mode SPG: TIDAK boleh menginput sebelum Supervisi memilih & me-save titik lokasi LKK-nya
         col_spg_s1, col_spg_s2 = st.columns([0.78, 0.22])
         with col_spg_s1:
-            if latest_sup_point:
+            if locked_point_today:
+                kontak_info = (
+                    f" • Kontak Tim Tersimpan: **{latest_sup_contact['kontak']}**"
+                    if latest_sup_contact and latest_sup_contact.get("warkop", "").casefold() == locked_point_today["warkop"].casefold()
+                    else ""
+                )
                 st.success(
-                    f"🔗 **Titik LKK Aktif (Dari Supervisi):** **{latest_sup_point['warkop']}** "
-                    f"({latest_sup_point['kecamatan']}) • Kontak Tim: **{latest_sup_point['kontak']}**"
+                    f"🔒 **Titik LKK Terkunci (Dari Supervisi):** **{locked_point_today['warkop']}** "
+                    f"({locked_point_today['kecamatan']}){kontak_info}"
                 )
             else:
-                st.info("ℹ️ Menunggu input kontak Supervisi hari ini untuk sinkronisasi titik LKK. Form laporan SPG tetap bisa langsung diisi.")
+                st.error(
+                    "⛔ **Menunggu Supervisi Save Titik LKK.** Form input SPG belum dibuka sampai Supervisi memilih dan menyimpan (lock) titik lokasi LKK hari ini."
+                )
         with col_spg_s2:
             st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
             if st.button("🔄 Refresh", key="btn_refresh_spg_sync", use_container_width=True):
                 st.rerun()
 
-        if latest_sup_point:
-            kecamatan_pilihan = latest_sup_point["kecamatan"] or (
-                daftar_kecamatan_terjadwal[0] if daftar_kecamatan_terjadwal else "Kecamatan Umum"
-            )
-            nama_warkop_manual = latest_sup_point["warkop"]
-            alamat_warkop_terpilih = latest_sup_point["alamat"]
+        if locked_point_today:
+            kecamatan_pilihan = locked_point_today["kecamatan"] or "-"
+            nama_warkop_manual = locked_point_today["warkop"]
+            alamat_warkop_terpilih = locked_point_today["alamat"]
         else:
-            kecamatan_pilihan = daftar_kecamatan_terjadwal[0] if daftar_kecamatan_terjadwal else "Kecamatan Umum"
-            default_warkop = "-"
-            if not df_master_excel.empty and col_warkop_excel:
-                w_vals = df_master_excel[col_warkop_excel].dropna().unique().tolist()
-                if w_vals:
-                    default_warkop = str(w_vals[0]).strip()
-            nama_warkop_manual = default_warkop
+            kecamatan_pilihan = "-"
+            nama_warkop_manual = ""
             alamat_warkop_terpilih = "-"
-            if not df_master_excel.empty and col_warkop_excel and col_alamat_excel and default_warkop != "-":
-                match_row = df_master_excel[
-                    df_master_excel[col_warkop_excel].astype(str).str.strip() == default_warkop
-                ]
-                if not match_row.empty:
-                    alamat_warkop_terpilih = str(match_row.iloc[0][col_alamat_excel])
 
     st.markdown(f"""
     <div class="address-box">
-        📍 <b>Kecamatan:</b> {kecamatan_pilihan} &nbsp;|&nbsp; <b>Warkop / LKK:</b> {nama_warkop_manual}<br/>
+        📍 <b>Kecamatan:</b> {kecamatan_pilihan} &nbsp;|&nbsp; <b>Warkop / LKK:</b> {nama_warkop_manual or '(Belum di-save Supervisi)'}<br/>
         🏠 <b>Alamat:</b> {alamat_warkop_terpilih}
     </div>
     """, unsafe_allow_html=True)
 
 # ====================================================
-# MODE SUPERVISI
+# MODE SUPERVISI (2 MENU SAVE: SAVE TITIK LKK & SAVE JUMLAH KONTAK)
 # ====================================================
 if st.session_state["login_mode"] == "Supervisi":
     st.markdown("---")
     st.markdown(f"### 👀 Dashboard Monitoring & Entry Supervisi: {st.session_state['user_spg']} (Plat Mobil: `{st.session_state['plat_mobil']}`)")
-    st.caption("Kontak Supervisi bersifat per team di titik LKK yang sama (tidak dipecah/digandakan per SPG).")
+    st.caption("Alur 2 Save: (1) Save Titik LKK untuk membuka input SPG, lalu setelah SPG selesai jualan (2) Save Jumlah Kontak Konsumen Tim.")
 
+    # SAVE #2: Save untuk menyimpan jumlah kontak konsumen setelah SPG selesai jualan
     with st.form("form_entry_kontak_supervisi"):
-        st.markdown("#### 📝 Input Manual Jumlah Kontak Konsumen Tim (Oleh Supervisi)")
+        st.markdown("#### 📝 Save Jumlah Kontak Konsumen Tim (Setelah SPG Selesai Jualan)")
+        if not str(nama_warkop_manual).strip():
+            st.warning("Pilih dan save Titik LKK terlebih dahulu sebelum menyimpan jumlah kontak konsumen.")
         jumlah_kontak_input = st.number_input(
-            f"Jumlah Kontak Konsumen Tim di {nama_warkop_manual}",
+            f"Jumlah Kontak Konsumen Tim di {nama_warkop_manual or 'Titik LKK'}",
             min_value=0,
             step=1,
             value=0,
-            help="Masukkan jumlah total kontak konsumen yang berhasil dihubungi tim di titik LKK ini",
+            help="Masukkan jumlah total kontak konsumen tim di titik LKK ini setelah SPG selesai jualan (bersifat tim, tidak dipecah per SPG/brand).",
         )
-        btn_simpan_kontak = st.form_submit_button("💾 Simpan Jumlah Kontak Titik LKK Ini", type="primary")
+        btn_simpan_kontak = st.form_submit_button("💾 Save Jumlah Kontak Konsumen", type="primary")
 
         if btn_simpan_kontak:
-            df_sup_db = load_supervisi_database()
-            waktu_wib = datetime.utcnow() + timedelta(hours=7)
-            new_sup_row = {
-                "Waktu": waktu_wib.strftime("%Y-%m-%d %H:%M:%S"),
-                "Promotor": st.session_state["user_spg"],
-                "Plat_Mobil": st.session_state["plat_mobil"],
-                "Kota_Kab": st.session_state["kota_kab"],
-                "Kecamatan": kecamatan_pilihan,
-                "Warkop_LKK": str(nama_warkop_manual).strip(),
-                "Alamat_Warkop": alamat_warkop_terpilih,
-                "Jumlah_Kontak_Manual": int(jumlah_kontak_input),
-            }
-            df_sup_db = pd.concat([df_sup_db, pd.DataFrame([new_sup_row])], ignore_index=True)
-            save_supervisi_database(df_sup_db)
-            st.success(
-                f"✅ Berhasil menyimpan **{jumlah_kontak_input} kontak tim** untuk titik "
-                f"**{nama_warkop_manual}**! Titik langsung tampil di Rekapitulasi Combine & tersinkronisasi ke tim."
-            )
-            st.rerun()
+            if not str(nama_warkop_manual).strip():
+                st.error("❌ Gagal menyimpan kontak: Titik LKK belum dipilih/disimpan.")
+            else:
+                df_sup_db = load_supervisi_database()
+                waktu_wib = datetime.utcnow() + timedelta(hours=7)
+                new_sup_row = {
+                    "Waktu": waktu_wib.strftime("%Y-%m-%d %H:%M:%S"),
+                    "Promotor": st.session_state["user_spg"],
+                    "Plat_Mobil": st.session_state["plat_mobil"],
+                    "Kota_Kab": st.session_state["kota_kab"],
+                    "Kecamatan": kecamatan_pilihan,
+                    "Warkop_LKK": str(nama_warkop_manual).strip(),
+                    "Alamat_Warkop": alamat_warkop_terpilih,
+                    "Jumlah_Kontak_Manual": int(jumlah_kontak_input),
+                }
+                df_sup_db = pd.concat([df_sup_db, pd.DataFrame([new_sup_row])], ignore_index=True)
+                save_supervisi_database(df_sup_db)
+                st.success(
+                    f"✅ Berhasil menyimpan **{jumlah_kontak_input} kontak tim** untuk titik "
+                    f"**{nama_warkop_manual}**! Data langsung masuk ke log Supervisi & Rekapitulasi Combine."
+                )
+                st.rerun()
 
     st.markdown("---")
 
@@ -2882,12 +2966,12 @@ if st.session_state["login_mode"] == "Supervisi":
         df_current_team_sup = df_sup_db[df_sup_db["Promotor"] == st.session_state["user_spg"]].copy()
 
     df_lkk_active_spg = pd.DataFrame()
-    if not df_current_team_spg.empty:
+    if not df_current_team_spg.empty and str(nama_warkop_manual).strip():
         df_current_team_spg["Jumlah_Bungkus"] = pd.to_numeric(df_current_team_spg["Jumlah_Bungkus"], errors="coerce").fillna(0)
         df_lkk_active_spg = df_current_team_spg[df_current_team_spg["Warkop_LKK"].astype(str).str.strip() == str(nama_warkop_manual).strip()]
 
     kontak_supervisi_team_lkk = 0
-    if not df_current_team_sup.empty:
+    if not df_current_team_sup.empty and str(nama_warkop_manual).strip():
         df_lkk_active_sup = df_current_team_sup[df_current_team_sup["Warkop_LKK"].astype(str).str.strip() == str(nama_warkop_manual).strip()]
         if not df_lkk_active_sup.empty:
             kontak_supervisi_team_lkk = int(pd.to_numeric(df_lkk_active_sup["Jumlah_Kontak_Manual"], errors="coerce").fillna(0).sum())
@@ -2953,18 +3037,18 @@ if st.session_state["login_mode"] == "Supervisi":
         ].sort_values(by="Total_Omset_Bungkus", ascending=False)
         st.dataframe(df_combine_rekap, use_container_width=True)
     else:
-        st.info("Titik LKK akan muncul di rekap setelah Supervisi selesai menginput jumlah kontak.")
+        st.info("Titik LKK akan tampil di rekap setelah Supervisi menginput jumlah kontak.")
 
     st.markdown("#### 📑 Log Detail Konsumen Beli (SPG) di Warkop Ini")
     if not df_lkk_active_spg.empty:
         st.dataframe(df_lkk_active_spg.drop(columns=["Waktu", "Promotor", "Plat_Mobil"], errors="ignore"), use_container_width=True)
     else:
-        st.info(f"Belum ada data konsumen beli masuk untuk titik Warkop / LKK '{nama_warkop_manual}'.")
+        st.info(f"Belum ada data konsumen beli masuk untuk titik Warkop / LKK '{nama_warkop_manual or '-'}'.")
 
     st.stop()
 
 # ====================================================
-# MODE SPG
+# MODE SPG (TERKUNCI SAMPAI SUPERVISI SAVE TITIK LKK)
 # ====================================================
 daftar_master_spg = load_master_spgs()
 if daftar_master_spg:
@@ -2972,13 +3056,19 @@ if daftar_master_spg:
 else:
     nama_spg_manual = st.text_input("👩‍💼 Nama SPG (Entry Manual)", placeholder="Contoh: Nanda")
 
-# Form SPG tetap bisa langsung diisi kapan saja (tidak diblok menunggu Supervisi)
-if is_inside_geofence and str(nama_spg_manual).strip() != "" and str(nama_warkop_manual).strip() != "":
-    st.success(f"✅ Form siap diisi untuk **{str(nama_spg_manual).strip()}** di **{nama_warkop_manual}**")
+has_locked_lkk = locked_point_today is not None and str(nama_warkop_manual).strip() != ""
+
+if not has_locked_lkk:
+    st.error(
+        "🔒 **Form Input SPG Terkunci:** Supervisi belum memilih dan menyimpan (**Save Titik LKK**) titik lokasi LKK hari ini. "
+        "Silakan tunggu Supervisi me-lock titik LKK lalu tekan **🔄 Refresh**."
+    )
+elif is_inside_geofence and str(nama_spg_manual).strip() != "":
+    st.success(f"✅ Form terbuka untuk **{str(nama_spg_manual).strip()}** pada titik terkunci **{nama_warkop_manual}**")
 
     with st.form("form_laporan_spg"):
         st.markdown("### 📝 Form Input Laporan Konsumen")
-        st.caption(f"Team: **{st.session_state['user_spg']}** • SPG: **{str(nama_spg_manual).strip()}** • Titik: **{str(nama_warkop_manual).strip()}**")
+        st.caption(f"Team: **{st.session_state['user_spg']}** • SPG: **{str(nama_spg_manual).strip()}** • Titik Terkunci: **{str(nama_warkop_manual).strip()}**")
 
         all_master_brands = load_master_brands()
         team_brands_map = load_master_team_brands()
@@ -3154,7 +3244,6 @@ if not df_user_rekap.empty:
         .rename(columns={"Brand_Rokok_Clean": "Brand_Rokok"})
     )
 
-    # Kontak_Supervisi_Team merujuk ke kontak tim pada tanggal tersebut (tidak dipecah/digandakan per SPG atau brand)
     df_eval_spg["Kontak_Supervisi_Team"] = df_eval_spg["Tanggal"].map(
         lambda t: int(team_contact_by_date.get(t, 0))
     )
