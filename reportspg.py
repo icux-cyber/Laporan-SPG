@@ -739,63 +739,53 @@ def save_supervisi_database(df):
     df.to_csv(DB_SUPERVISI_KONTAK_FILE, index=False)
 
 
-def get_active_spg_points_today(team_name: str, fallback_kota: str = "", fallback_kec: str = "") -> list[dict]:
-    """
-    Mengambil daftar titik unik (Warkop_LKK) yang sudah diinput SPG untuk team tertentu
-    pada hari ini (WIB), diurutkan dari input paling baru ke yang lebih awal.
-    """
-    df_spg = load_database()
-    if df_spg is None or df_spg.empty:
-        return []
-
+def get_latest_supervisi_point_today(
+    team_name: str,
+    fallback_kota: str = "",
+    fallback_kec: str = "",
+    df_sup: pd.DataFrame | None = None,
+) -> dict | None:
+    """Mengambil titik LKK terbaru yang sudah diinput & disimpan oleh Supervisi hari ini untuk team tersebut."""
     today_str = (datetime.utcnow() + timedelta(hours=7)).strftime("%Y-%m-%d")
+    if df_sup is None:
+        df_sup = load_supervisi_database()
+    if df_sup is None or df_sup.empty:
+        return None
+
     mask = (
-        df_spg["Promotor"].astype(str).str.strip().str.casefold()
+        df_sup["Promotor"].astype(str).str.strip().str.casefold()
         == str(team_name or "").strip().casefold()
     ) & (
-        df_spg["Waktu"].astype(str).str.startswith(today_str)
+        df_sup["Waktu"].astype(str).str.startswith(today_str)
     )
     if fallback_kota:
         mask = mask & (
-            df_spg["Kota_Kab"].astype(str).str.strip().str.casefold()
+            df_sup["Kota_Kab"].astype(str).str.strip().str.casefold()
             == str(fallback_kota).strip().casefold()
         )
-    if fallback_kec:
-        mask = mask & (
-            df_spg["Kecamatan"].astype(str).str.strip().str.casefold()
-            == str(fallback_kec).strip().casefold()
-        )
 
-    df_today = df_spg[mask].copy()
+    df_today = df_sup[mask].copy()
     if df_today.empty:
-        return []
+        return None
 
-    parsed_time = pd.to_datetime(df_today["Waktu"], errors="coerce")
-    if parsed_time.notna().any():
-        df_today = df_today.assign(_dt=parsed_time).sort_values("_dt", ascending=False)
+    parsed = pd.to_datetime(df_today["Waktu"], errors="coerce")
+    if parsed.notna().any():
+        df_today = df_today.assign(_dt=parsed).sort_values("_dt", ascending=False)
     else:
         df_today = df_today.iloc[::-1]
 
-    points = []
-    seen_warkop = set()
     for _, row in df_today.iterrows():
         warkop = str(row.get("Warkop_LKK", "") or "").strip()
-        if not warkop:
-            continue
-        norm_key = warkop.casefold()
-        if norm_key in seen_warkop:
-            continue
-        seen_warkop.add(norm_key)
-        points.append({
-            "kota": str(row.get("Kota_Kab", fallback_kota) or fallback_kota).strip(),
-            "kecamatan": str(row.get("Kecamatan", fallback_kec) or fallback_kec).strip(),
-            "warkop": warkop,
-            "alamat": str(row.get("Alamat_Warkop", "-") or "-").strip() or "-",
-            "waktu": str(row.get("Waktu", "") or "").strip(),
-            "spg": str(row.get("Nama_SPG", "") or "").strip(),
-        })
-
-    return points
+        if warkop:
+            return {
+                "kota": str(row.get("Kota_Kab", fallback_kota) or fallback_kota).strip(),
+                "kecamatan": str(row.get("Kecamatan", fallback_kec) or fallback_kec).strip(),
+                "warkop": warkop,
+                "alamat": str(row.get("Alamat_Warkop", "-") or "-").strip() or "-",
+                "kontak": int(pd.to_numeric(row.get("Jumlah_Kontak_Manual", 0), errors="coerce") or 0),
+                "waktu": str(row.get("Waktu", "") or "").strip(),
+            }
+    return None
 
 
 # ====================================================
