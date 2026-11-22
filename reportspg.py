@@ -11,6 +11,11 @@ from shapely.geometry import Point
 import streamlit as st
 from streamlit_js_eval import get_geolocation
 
+from team_brand_sync import (
+    match_brands_by_team_name,
+    resolve_team_allowed_brands,
+)
+
 from schedule_entry import SCHEDULE_DETAIL_FILE, get_scheduled_vehicles, render_schedule_entry
 
 # ====================================================
@@ -823,15 +828,20 @@ def load_master_team_brands():
     current_brands = load_master_brands()
     team_map = load_master_team_names()
     active_team_names = [team_map[f"Team SPG {i}"] for i in range(1, 21) if team_map[f"Team SPG {i}"]]
-    default_teams = {team_name: current_brands.copy() for team_name in active_team_names}
+    default_teams = {
+        team_name: match_brands_by_team_name(team_name, current_brands)
+        for team_name in active_team_names
+    }
     if os.path.exists(MASTER_TEAM_BRAND_FILE):
         try:
             with open(MASTER_TEAM_BRAND_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                if not isinstance(data, dict):
+                    data = {}
                 for i, t_name in enumerate(active_team_names, start=1):
                     t_key = f"Team SPG {i}"
                     if t_name not in data and t_key not in data:
-                        data[t_name] = current_brands.copy()
+                        data[t_name] = match_brands_by_team_name(t_name, current_brands)
                 return data
         except Exception:
             return default_teams
@@ -2318,11 +2328,18 @@ if not st.session_state["logged_in"]:
             elif st.session_state["login_mode"] == "Supervisi" and len(scheduled_vehicles) != 1:
                 st.error("❌ Akses Supervisi ditolak: plat kendaraan pada jadwal belum tersedia atau tidak konsisten.")
             else:
+                today_wib = (datetime.utcnow() + timedelta(hours=7)).date()
+                spg_vehicles = (
+                    scheduled_vehicles
+                    if st.session_state["login_mode"] == "Supervisi"
+                    else get_scheduled_vehicles(matched_schedule_rows, today_wib)
+                )
                 st.session_state["logged_in"] = True
                 st.session_state["user_spg"] = pilihan_user
-                st.session_state["plat_mobil"] = scheduled_vehicles[0] if st.session_state["login_mode"] == "Supervisi" else "-"
+                st.session_state["plat_mobil"] = spg_vehicles[0] if len(spg_vehicles) == 1 else "-"
                 st.session_state["kota_kab"] = auto_detected_kota
                 st.rerun()
+                
 
     st.markdown(
         """
@@ -2625,10 +2642,18 @@ if is_inside_geofence and str(nama_spg_manual).strip() != "" and str(nama_warkop
         st.markdown("### 📝 Form Input Laporan Konsumen")
         st.caption(f"Team: **{st.session_state['user_spg']}** • SPG: **{str(nama_spg_manual).strip()}** • Titik: **{str(nama_warkop_manual).strip()}**")
 
+        all_master_brands = load_master_brands()
         team_brands_map = load_master_team_brands()
-        allowed_brands_for_team = team_brands_map.get(st.session_state["user_spg"], load_master_brands())
+        team_names_map = load_master_team_names()
+        allowed_brands_for_team = resolve_team_allowed_brands(
+            team_name=st.session_state["user_spg"],
+            all_brands=all_master_brands,
+            team_brands_map=team_brands_map,
+            team_names_map=team_names_map,
+            prefer_keyword_match=True,
+        )
         if not allowed_brands_for_team:
-            allowed_brands_for_team = load_master_brands()
+            allowed_brands_for_team = all_master_brands
 
         col_f1, col_f2 = st.columns([1.3, 0.7])
         with col_f1:
