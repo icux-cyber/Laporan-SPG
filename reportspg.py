@@ -1352,15 +1352,25 @@ def load_target_rules():
     if os.path.exists(MASTER_TARGET_FILE):
         try:
             with open(MASTER_TARGET_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                return data if isinstance(data, dict) else dict(DEFAULT_TARGET_RULES)
         except Exception:
-            return DEFAULT_TARGET_RULES
-    return DEFAULT_TARGET_RULES
+            return dict(DEFAULT_TARGET_RULES)
+    return dict(DEFAULT_TARGET_RULES)
+
+
+def refresh_target_rules():
+    global TARGET_RULES
+    TARGET_RULES = load_target_rules()
+    return TARGET_RULES
 
 
 def save_target_rules(rules):
+    global TARGET_RULES
+    cleaned = rules if isinstance(rules, dict) else {}
     with open(MASTER_TARGET_FILE, "w", encoding="utf-8") as f:
-        json.dump(rules, f, ensure_ascii=False, indent=2)
+        json.dump(cleaned, f, ensure_ascii=False, indent=2)
+    TARGET_RULES = load_target_rules()
 
 
 TARGET_RULES = load_target_rules()
@@ -1371,9 +1381,10 @@ def normalize_brand_key(brand):
 
 
 def get_brand_target_rule(brand):
+    rules_map = refresh_target_rules()
     brand_key = normalize_brand_key(brand)
     return next(
-        (rule for rule_brand, rule in TARGET_RULES.items() if normalize_brand_key(rule_brand) == brand_key),
+        (rule for rule_brand, rule in rules_map.items() if normalize_brand_key(rule_brand) == brand_key),
         {},
     )
 
@@ -1384,7 +1395,8 @@ def clean_brand_target_name(brand):
 
 
 def get_group_target(group_name, target_key, default_val):
-    for brand, rule in TARGET_RULES.items():
+    rules_map = refresh_target_rules()
+    for brand, rule in rules_map.items():
         rule_group = rule.get("group")
         if rule_group == "Black_Siro_Kuro":
             rule_group = "Black_Matcha"
@@ -1748,6 +1760,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                         if new_group:
                             target_rules_data[b_clean]["group"] = new_group
                         save_target_rules(target_rules_data)
+                        refresh_target_rules()
                         st.success(f"✅ Merek rokok '{b_clean}' berhasil ditambahkan!")
                         st.rerun()
                     else:
@@ -1792,6 +1805,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                         if edit_group:
                             target_rules_data[b]["group"] = edit_group
                         save_target_rules(target_rules_data)
+                        refresh_target_rules()
                         st.success(f"✅ Target brand '{b}' berhasil diperbarui!")
                         st.rerun()
 
@@ -1801,6 +1815,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                         if b in target_rules_data:
                             del target_rules_data[b]
                             save_target_rules(target_rules_data)
+                        refresh_target_rules()
                         st.success(f"🗑️ Brand '{b}' berhasil dihapus!")
                         st.rerun()
 
