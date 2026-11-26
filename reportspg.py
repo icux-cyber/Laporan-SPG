@@ -11,7 +11,12 @@ from shapely.geometry import Point
 import streamlit as st
 from streamlit_js_eval import get_geolocation
 
-from schedule_entry import SCHEDULE_DETAIL_FILE, get_scheduled_vehicles, render_schedule_entry
+from schedule_entry import (
+    SCHEDULE_DETAIL_FILE,
+    get_scheduled_personnel_for_team,
+    get_scheduled_vehicles,
+    render_schedule_entry,
+)
 from team_brand_sync import (
     match_brands_by_team_name,
     resolve_team_allowed_brands,
@@ -1393,6 +1398,9 @@ def style_status_target(val):
 def reset_session_on_user_change():
     st.session_state["logged_in"] = False
     st.session_state["user_spg"] = st.session_state.get("selected_team_login", "")
+    st.session_state["nama_supervisi_aktif"] = ""
+    st.session_state["spg_terjadwal_list"] = []
+    st.session_state["sektor_terjadwal_login"] = ""
     st.session_state["draft_konsumen"] = ""
     st.session_state["draft_nohp"] = ""
     st.session_state["draft_ig"] = ""
@@ -1408,6 +1416,12 @@ if "plat_mobil" not in st.session_state:
     st.session_state["plat_mobil"] = ""
 if "kota_kab" not in st.session_state:
     st.session_state["kota_kab"] = ""
+if "nama_supervisi_aktif" not in st.session_state:
+    st.session_state["nama_supervisi_aktif"] = ""
+if "spg_terjadwal_list" not in st.session_state:
+    st.session_state["spg_terjadwal_list"] = []
+if "sektor_terjadwal_login" not in st.session_state:
+    st.session_state["sektor_terjadwal_login"] = ""
 if "login_mode" not in st.session_state:
     st.session_state["login_mode"] = "SPG"
 if "admin_logged_in" not in st.session_state:
@@ -2786,10 +2800,6 @@ if not st.session_state["logged_in"]:
             for i in range(1, 21)
             if team_name_mapping[f"Team SPG {i}"]
         ]
-        if not list_team:
-            st.info("Belum ada nama team aktif. Admin perlu mengunggah jadwal SPG terlebih dahulu.")
-            st.stop()
-
         pilihan_user = st.selectbox(
             "👤 Nama Team Operasional",
             list_team,
@@ -2798,18 +2808,48 @@ if not st.session_state["logged_in"]:
         )
 
         schedule_ok, schedule_warning_msg, auto_detected_kota, auto_kecamatan_list, matched_schedule_rows = get_schedule_info_for_team(pilihan_user)
-        scheduled_vehicles = []
-        if schedule_ok and st.session_state["login_mode"] == "Supervisi":
-            today_wib = (datetime.utcnow() + timedelta(hours=7)).date()
+        today_wib = (datetime.utcnow() + timedelta(hours=7)).date()
+
+        selected_sektor_login = ""
+        if schedule_ok and len(auto_kecamatan_list) > 1:
+            selected_sektor_login = st.selectbox(
+                "📍 Pilih Sektor / Kecamatan Terjadwal Hari Ini",
+                options=auto_kecamatan_list,
+                key="login_select_sektor_team",
+            )
+        elif schedule_ok and len(auto_kecamatan_list) == 1:
+            selected_sektor_login = auto_kecamatan_list[0]
+
+        personnel_info = (
+            get_scheduled_personnel_for_team(pilihan_user, today_wib, selected_kecamatan=selected_sektor_login)
+            if schedule_ok
+            else {"found": False, "supervisi": [], "spg_1": [], "spg_2": [], "spg_all": [], "vehicles": [], "records": []}
+        )
+
+        if schedule_ok and personnel_info.get("records"):
+            auto_detected_kota = personnel_info["records"][0].get("kota") or auto_detected_kota
+
+        scheduled_vehicles = personnel_info.get("vehicles", []) if personnel_info.get("found") else []
+        if schedule_ok and not scheduled_vehicles:
             scheduled_vehicles = get_scheduled_vehicles(matched_schedule_rows, today_wib)
+
+        spv_names = personnel_info.get("supervisi", [])
+        spg1_names = personnel_info.get("spg_1", [])
+        spg2_names = personnel_info.get("spg_2", [])
+        spg_all_names = personnel_info.get("spg_all", [])
 
         if not schedule_ok:
             st.error("⚠️ **Tidak Ada Jadwal Team Tersebut Untuk Hari Ini**")
         else:
+            spv_label = ", ".join(spv_names) if spv_names else "Belum diatur di jadwal"
+            spg1_label = ", ".join(spg1_names) if spg1_names else "-"
+            spg2_label = ", ".join(spg2_names) if spg2_names else "-"
+            sektor_tampil = selected_sektor_login or (", ".join(auto_kecamatan_list) if auto_kecamatan_list else "-")
             st.success(
                 f"✅ **Jadwal Aktif Ditemukan**\n\n"
-                f"- **Wilayah:** {auto_detected_kota}\n"
-                f"- **Kecamatan:** {', '.join(auto_kecamatan_list) if auto_kecamatan_list else '-'}"
+                f"- **Wilayah / Sektor:** {auto_detected_kota} — **{sektor_tampil}**\n"
+                f"- **Supervisi:** **{spv_label}**\n"
+                f"- **SPG 1:** **{spg1_label}** | **SPG 2:** **{spg2_label}**"
             )
             if st.session_state["login_mode"] == "Supervisi":
                 if len(scheduled_vehicles) == 1:
@@ -2828,16 +2868,13 @@ if not st.session_state["logged_in"]:
             elif st.session_state["login_mode"] == "Supervisi" and len(scheduled_vehicles) != 1:
                 st.error("❌ Akses Supervisi ditolak: plat kendaraan pada jadwal belum tersedia atau tidak konsisten.")
             else:
-                today_wib = (datetime.utcnow() + timedelta(hours=7)).date()
-                spg_vehicles = (
-                    scheduled_vehicles
-                    if st.session_state["login_mode"] == "Supervisi"
-                    else get_scheduled_vehicles(matched_schedule_rows, today_wib)
-                )
                 st.session_state["logged_in"] = True
                 st.session_state["user_spg"] = pilihan_user
-                st.session_state["plat_mobil"] = spg_vehicles[0] if len(spg_vehicles) == 1 else "-"
+                st.session_state["plat_mobil"] = scheduled_vehicles[0] if len(scheduled_vehicles) == 1 else "-"
                 st.session_state["kota_kab"] = auto_detected_kota
+                st.session_state["nama_supervisi_aktif"] = spv_names[0] if spv_names else ""
+                st.session_state["spg_terjadwal_list"] = spg_all_names
+                st.session_state["sektor_terjadwal_login"] = selected_sektor_login
                 st.rerun()
 
     st.markdown(
@@ -2845,6 +2882,38 @@ if not st.session_state["logged_in"]:
         <div class="footer-note">
             Buka menu samping kiri (<b>&gt;</b>) untuk akses <b>Dashboard Admin</b><br/>
             © 2026 Tumarso Monitoring System
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.stop()
+
+# ====================================================
+# APLIKASI UTAMA SETELAH LOGIN (TEMA DINAMIS PER TEAM)
+# ====================================================
+apply_team_theme_css(st.session_state["user_spg"])
+
+col_banner, col_logout = st.columns([0.8, 0.2])
+
+with col_banner:
+    mode_badge = "👀 Supervisi" if st.session_state["login_mode"] == "Supervisi" else "📝 SPG"
+    spv_aktif = st.session_state.get("nama_supervisi_aktif", "").strip()
+    spg_list_aktif = st.session_state.get("spg_terjadwal_list", [])
+    personel_badge = (
+        f" &nbsp;•&nbsp; 🧑‍💼 SPV: <b>{spv_aktif or '-'}</b>"
+        if st.session_state["login_mode"] == "Supervisi"
+        else f" &nbsp;•&nbsp; 👩‍💼 SPG: <b>{', '.join(spg_list_aktif) if spg_list_aktif else '-'}</b>"
+    )
+    st.markdown(
+        f"""
+        <div class="user-banner">
+            <div class="user-banner-title">
+                <span>👤 {st.session_state['user_spg']}</span>
+                <span class="badge-mode">{mode_badge}</span>
+            </div>
+            <div class="user-banner-sub">
+                🚗 Plat: <b>{st.session_state['plat_mobil']}</b> &nbsp;•&nbsp; 🏙️ Wilayah: <b>{st.session_state['kota_kab']}</b>{personel_badge}
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -3235,11 +3304,27 @@ if st.session_state["login_mode"] == "Supervisi":
 # ====================================================
 # MODE SPG (TERKUNCI SAMPAI SUPERVISI SAVE TITIK LKK)
 # ====================================================
-daftar_master_spg = load_master_spgs()
-if daftar_master_spg:
-    nama_spg_manual = st.selectbox("👩‍💼 Pilih Nama SPG yang Bertugas", options=daftar_master_spg)
+today_wib_spg = (datetime.utcnow() + timedelta(hours=7)).date()
+sektor_aktif_spg = locked_point_today["kecamatan"] if locked_point_today else st.session_state.get("sektor_terjadwal_login", "")
+personnel_spg_today = get_scheduled_personnel_for_team(
+    st.session_state["user_spg"],
+    today_wib_spg,
+    selected_kecamatan=sektor_aktif_spg,
+)
+daftar_spg_terjadwal = personnel_spg_today.get("spg_all", []) or st.session_state.get("spg_terjadwal_list", [])
+
+if daftar_spg_terjadwal:
+    nama_spg_manual = st.selectbox(
+        "👩‍💼 Pilih Nama SPG yang Bertugas (Sesuai Jadwal Hari Ini)",
+        options=daftar_spg_terjadwal,
+        help="Menampilkan SPG 1 & SPG 2 yang terjadwal untuk team dan sektor ini.",
+    )
 else:
-    nama_spg_manual = st.text_input("👩‍💼 Nama SPG (Entry Manual)", placeholder="Contoh: Nanda")
+    daftar_master_spg = load_master_spgs()
+    if daftar_master_spg:
+        nama_spg_manual = st.selectbox("👩‍💼 Pilih Nama SPG yang Bertugas", options=daftar_master_spg)
+    else:
+        nama_spg_manual = st.text_input("👩‍💼 Nama SPG (Entry Manual)", placeholder="Contoh: Nanda")
 
 has_locked_lkk = locked_point_today is not None and str(nama_warkop_manual).strip() != ""
 
