@@ -2727,19 +2727,19 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
                     df_filtered_map["Urutan"] = df_filtered_map.index + 1
 
                 df_filtered_map["Jam_Label"] = df_filtered_map["Waktu_Dt"].dt.strftime("%H:%M").fillna("-")
-            df_filtered_map["Jam_Label"] = df_filtered_map["Waktu_Dt"].dt.strftime("%H:%M").fillna("-")
-            df_filtered_map["Warkop_Label"] = df_filtered_map["Warkop_LKK"].fillna("-").astype(str)
-            df_filtered_map["Indikator_Titik"] = (
-                "#" + df_filtered_map["Urutan"].astype(str)
-                + " (" + df_filtered_map["Jam_Label"] + ") - "
-                + df_filtered_map["Warkop_Label"]
-            )
-            _lat_str = df_filtered_map["Latitude"].map(lambda x: f"{x:.6f}")
-            _lon_str = df_filtered_map["Longitude"].map(lambda x: f"{x:.6f}")
-            df_filtered_map["Koordinat_Str"] = _lat_str + ", " + _lon_str
-            df_filtered_map["Link_Google_Maps"] = (
-                "https://www.google.com/maps/search/?api=1&query=" + _lat_str + "," + _lon_str
-            )
+                df_filtered_map["Warkop_Label"] = df_filtered_map["Warkop_LKK"].fillna("-").astype(str)
+                df_filtered_map["Indikator_Titik"] = (
+                    "#" + df_filtered_map["Urutan"].astype(str)
+                    + " (" + df_filtered_map["Jam_Label"] + ") - "
+                    + df_filtered_map["Warkop_Label"]
+                )
+                _lat_str = df_filtered_map["Latitude"].map(lambda x: f"{x:.6f}")
+                _lon_str = df_filtered_map["Longitude"].map(lambda x: f"{x:.6f}")
+                df_filtered_map["Koordinat_Str"] = _lat_str + ", " + _lon_str
+                df_filtered_map["Link_Google_Maps"] = (
+                    "https://www.google.com/maps/search/?api=1&query=" + _lat_str + "," + _lon_str
+                )
+
                 point_palette_rgba = [
                     [234, 88, 12, 235],
                     [37, 99, 235, 235],
@@ -2750,7 +2750,7 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
                     [202, 138, 4, 235],
                     [71, 85, 105, 235],
                 ]
-                point_palette_hex = [
+				point_palette_hex = [
                     "#EA580C", "#2563EB", "#16A34A", "#9333EA",
                     "#DB2777", "#0D9488", "#CA8A04", "#475569",
                 ]
