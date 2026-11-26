@@ -2690,11 +2690,12 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
 
             if not kecamatan_peta_terpilih:
                 st.caption("ℹ️ Tidak ada kecamatan yang dipilih pada filter poligon—poligon tidak digambar (titik & rute tetap tampil).")
+
             if len(kecamatan_peta_terpilih) > 8:
                 st.warning("⚠️ Maksimal 8 kecamatan untuk performa optimal. Menampilkan 8 pertama.")
                 kecamatan_peta_terpilih = kecamatan_peta_terpilih[:8]
 
-            features_gabungan = build_polygon_features(tuple(kecamatan_peta_terpilih))            
+            features_gabungan = build_polygon_features(tuple(kecamatan_peta_terpilih))
 
             if features_gabungan:
                 layers_list.append(
@@ -2750,11 +2751,11 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
                     [202, 138, 4, 235],
                     [71, 85, 105, 235],
                 ]
-				point_palette_hex = [
+                point_palette_hex = [
                     "#EA580C", "#2563EB", "#16A34A", "#9333EA",
                     "#DB2777", "#0D9488", "#CA8A04", "#475569",
                 ]
-
+				
                 if mode_warna_titik == "Per Tanggal":
                     categories = sorted(df_filtered_map["Tanggal"].fillna("-").astype(str).unique().tolist())
                     cat_to_idx = {cat: idx % len(point_palette_rgba) for idx, cat in enumerate(categories)}
