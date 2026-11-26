@@ -1733,14 +1733,13 @@ def clean_brand_target_name(brand):
 
 def get_group_target(group_name, target_key, default_val):
     rules_map = TARGET_RULES
-        for brand, rule in rules_map.items():
+    for brand, rule in rules_map.items():
         rule_group = rule.get("group")
         if rule_group == "Black_Siro_Kuro":
             rule_group = "Black_Matcha"
         if rule_group == group_name and target_key in rule:
             return rule[target_key]
     return default_val
-
 
 def get_target_for_brand(brand, target_key, default_val):
     brand_str = str(brand or "").strip()
