@@ -1445,6 +1445,11 @@ def reset_session_on_user_change():
     st.session_state["draft_ig"] = ""
     st.session_state["draft_bungkus"] = 1
     st.session_state["draft_bumo"] = ""
+    st.session_state["draft_brand"] = ""
+    st.session_state["draft_gender"] = "L"
+    st.session_state["draft_range_umur"] = "18-24"
+    st.session_state["spg_form_nonce"] = st.session_state.get("spg_form_nonce", 0) + 1
+    st.session_state["sup_kontak_nonce"] = st.session_state.get("sup_kontak_nonce", 0) + 1
 
 
 if "logged_in" not in st.session_state:
@@ -1477,6 +1482,16 @@ if "draft_bungkus" not in st.session_state:
     st.session_state["draft_bungkus"] = 1
 if "draft_bumo" not in st.session_state:
     st.session_state["draft_bumo"] = ""
+if "draft_brand" not in st.session_state:
+    st.session_state["draft_brand"] = ""
+if "draft_gender" not in st.session_state:
+    st.session_state["draft_gender"] = "L"
+if "draft_range_umur" not in st.session_state:
+    st.session_state["draft_range_umur"] = "18-24"
+if "spg_form_nonce" not in st.session_state:
+    st.session_state["spg_form_nonce"] = 0
+if "sup_kontak_nonce" not in st.session_state:
+    st.session_state["sup_kontak_nonce"] = 0
 
 # ====================================================
 # SIDEBAR ADMIN (TERORGANISIR)
@@ -3185,7 +3200,8 @@ if st.session_state["login_mode"] == "Supervisi":
     st.caption("Alur 2 Save: (1) Save Titik LKK untuk membuka input SPG, lalu setelah SPG selesai jualan (2) Save Jumlah Kontak Konsumen Tim.")
 
     # SAVE #2: Save untuk menyimpan jumlah kontak konsumen setelah SPG selesai jualan
-    with st.form("form_entry_kontak_supervisi"):
+    sup_nonce = st.session_state.get("sup_kontak_nonce", 0)
+    with st.form(f"form_entry_kontak_supervisi_{sup_nonce}"):
         st.markdown("#### 📝 Save Jumlah Kontak Konsumen Tim (Setelah SPG Selesai Jualan)")
         if not str(nama_warkop_manual).strip():
             st.warning("Pilih dan save Titik LKK terlebih dahulu sebelum menyimpan jumlah kontak konsumen.")
@@ -3194,6 +3210,7 @@ if st.session_state["login_mode"] == "Supervisi":
             min_value=0,
             step=1,
             value=0,
+            key=f"input_jumlah_kontak_sup_{sup_nonce}",
             help="Masukkan jumlah total kontak konsumen tim di titik LKK ini setelah SPG selesai jualan (bersifat tim, tidak dipecah per SPG/brand).",
         )
         btn_simpan_kontak = st.form_submit_button("💾 Save Jumlah Kontak Konsumen", type="primary")
@@ -3216,11 +3233,15 @@ if st.session_state["login_mode"] == "Supervisi":
                 }
                 df_sup_db = pd.concat([df_sup_db, pd.DataFrame([new_sup_row])], ignore_index=True)
                 save_supervisi_database(df_sup_db)
-                st.success(
+                st.session_state["sup_kontak_nonce"] = sup_nonce + 1
+                st.session_state["sup_last_saved_msg"] = (
                     f"✅ Berhasil menyimpan **{jumlah_kontak_input} kontak tim** untuk titik "
                     f"**{nama_warkop_manual}**! Data langsung masuk ke log Supervisi & Rekapitulasi Combine."
                 )
                 st.rerun()
+
+    if st.session_state.get("sup_last_saved_msg"):
+        st.success(st.session_state.pop("sup_last_saved_msg"))
 
     st.markdown("---")
 
@@ -3333,14 +3354,23 @@ if daftar_spg_terjadwal:
     nama_spg_manual = st.selectbox(
         "👩‍💼 Pilih Nama SPG yang Bertugas (Sesuai Jadwal Hari Ini)",
         options=daftar_spg_terjadwal,
+        key="spg_active_name_selector",
         help="Menampilkan SPG 1 & SPG 2 yang terjadwal untuk team dan sektor ini.",
     )
 else:
     daftar_master_spg = load_master_spgs()
     if daftar_master_spg:
-        nama_spg_manual = st.selectbox("👩‍💼 Pilih Nama SPG yang Bertugas", options=daftar_master_spg)
+        nama_spg_manual = st.selectbox(
+            "👩‍💼 Pilih Nama SPG yang Bertugas",
+            options=daftar_master_spg,
+            key="spg_active_name_selector",
+        )
     else:
-        nama_spg_manual = st.text_input("👩‍💼 Nama SPG (Entry Manual)", placeholder="Contoh: Nanda")
+        nama_spg_manual = st.text_input(
+            "👩‍💼 Nama SPG (Entry Manual)",
+            placeholder="Contoh: Nanda",
+            key="spg_active_name_selector",
+        )
 
 has_locked_lkk = locked_point_today is not None and str(nama_warkop_manual).strip() != ""
 
@@ -3352,7 +3382,12 @@ if not has_locked_lkk:
 elif is_inside_geofence and str(nama_spg_manual).strip() != "":
     st.success(f"✅ Form terbuka untuk **{str(nama_spg_manual).strip()}** pada titik terkunci **{nama_warkop_manual}**")
 
-    with st.form("form_laporan_spg"):
+    if st.session_state.get("spg_last_saved_msg"):
+        st.balloons()
+        st.success(st.session_state.pop("spg_last_saved_msg"))
+
+    spg_nonce = st.session_state.get("spg_form_nonce", 0)
+    with st.form(f"form_laporan_spg_{spg_nonce}"):
         st.markdown("### 📝 Form Input Laporan Konsumen")
         st.caption(f"Team: **{st.session_state['user_spg']}** • SPG: **{str(nama_spg_manual).strip()}** • Titik Terkunci: **{str(nama_warkop_manual).strip()}**")
 
@@ -3369,11 +3404,31 @@ elif is_inside_geofence and str(nama_spg_manual).strip() != "":
         if not allowed_brands_for_team:
             allowed_brands_for_team = all_master_brands
 
+        default_brand_idx = (
+            allowed_brands_for_team.index(st.session_state["draft_brand"])
+            if st.session_state.get("draft_brand") in allowed_brands_for_team
+            else 0
+        )
+        gender_options = ["L", "P"]
+        default_gender_idx = (
+            gender_options.index(st.session_state["draft_gender"])
+            if st.session_state.get("draft_gender") in gender_options
+            else 0
+        )
+        age_options = ["18-24", "25-30", "31-35", "36-44", "45+"]
+        default_age_idx = (
+            age_options.index(st.session_state["draft_range_umur"])
+            if st.session_state.get("draft_range_umur") in age_options
+            else 0
+        )
+
         col_f1, col_f2 = st.columns([1.3, 0.7])
         with col_f1:
             brand_entry = st.selectbox(
                 "🚬 Brand Rokok",
                 options=allowed_brands_for_team,
+                index=default_brand_idx,
+                key=f"spg_brand_{spg_nonce}",
                 help="Daftar merek rokok disesuaikan dengan alokasi Master Team Admin",
             )
         with col_f2:
@@ -3381,24 +3436,56 @@ elif is_inside_geofence and str(nama_spg_manual).strip() != "":
                 "📦 Jumlah Bungkus",
                 min_value=1,
                 step=1,
-                value=st.session_state["draft_bungkus"],
+                value=int(st.session_state.get("draft_bungkus", 1) or 1),
+                key=f"spg_bungkus_{spg_nonce}",
             )
 
-        nama_konsumen = st.text_input("👤 Nama Konsumen", value=st.session_state["draft_konsumen"], placeholder="Masukkan nama konsumen")
+        nama_konsumen = st.text_input(
+            "👤 Nama Konsumen",
+            value=st.session_state["draft_konsumen"],
+            placeholder="Masukkan nama konsumen",
+            key=f"spg_konsumen_{spg_nonce}",
+        )
 
         col_g1, col_g2 = st.columns(2)
         with col_g1:
-            gender_entry = st.radio("⚧️ Gender", ["L", "P"], horizontal=True)
+            gender_entry = st.radio(
+                "⚧️ Gender",
+                gender_options,
+                index=default_gender_idx,
+                horizontal=True,
+                key=f"spg_gender_{spg_nonce}",
+            )
         with col_g2:
-            range_umur_entry = st.selectbox("🎂 Range Umur", options=["18-24", "25-30", "31-35", "36-44", "45+"])
+            range_umur_entry = st.selectbox(
+                "🎂 Range Umur",
+                options=age_options,
+                index=default_age_idx,
+                key=f"spg_umur_{spg_nonce}",
+            )
 
         col_c1, col_c2 = st.columns(2)
         with col_c1:
-            nohp_entry = st.text_input("📱 No HP", value=st.session_state["draft_nohp"], placeholder="081234567890")
+            nohp_entry = st.text_input(
+                "📱 No HP",
+                value=st.session_state["draft_nohp"],
+                placeholder="081234567890",
+                key=f"spg_nohp_{spg_nonce}",
+            )
         with col_c2:
-            instagram_input = st.text_input("📸 Instagram", value=st.session_state["draft_ig"], placeholder="username_ig")
+            instagram_input = st.text_input(
+                "📸 Instagram",
+                value=st.session_state["draft_ig"],
+                placeholder="username_ig",
+                key=f"spg_ig_{spg_nonce}",
+            )
 
-        rokok_asal_bumo = st.text_input("🔄 Rokok Asal (BUMO)", value=st.session_state["draft_bumo"], placeholder="Merk rokok yang biasa dikonsumsi sebelumnya")
+        rokok_asal_bumo = st.text_input(
+            "🔄 Rokok Asal (BUMO)",
+            value=st.session_state["draft_bumo"],
+            placeholder="Merk rokok yang biasa dikonsumsi sebelumnya",
+            key=f"spg_bumo_{spg_nonce}",
+        )
 
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
@@ -3407,6 +3494,9 @@ elif is_inside_geofence and str(nama_spg_manual).strip() != "":
             btn_kirim = st.form_submit_button("🚀 Kirim Laporan", type="primary", use_container_width=True)
 
         if btn_save_draft:
+            st.session_state["draft_brand"] = brand_entry
+            st.session_state["draft_gender"] = gender_entry
+            st.session_state["draft_range_umur"] = range_umur_entry
             st.session_state["draft_konsumen"] = nama_konsumen
             st.session_state["draft_nohp"] = nohp_entry
             st.session_state["draft_ig"] = instagram_input
@@ -3445,14 +3535,20 @@ elif is_inside_geofence and str(nama_spg_manual).strip() != "":
                 df_all = pd.concat([df_all, df_new_row], ignore_index=True)
                 save_database(df_all)
 
+                # Reset seluruh isian form konsumen kembali ke nilai default sementara Nama SPG tetap dipertahankan
+                st.session_state["draft_brand"] = ""
+                st.session_state["draft_gender"] = "L"
+                st.session_state["draft_range_umur"] = "18-24"
                 st.session_state["draft_konsumen"] = ""
                 st.session_state["draft_nohp"] = ""
                 st.session_state["draft_ig"] = ""
                 st.session_state["draft_bungkus"] = 1
                 st.session_state["draft_bumo"] = ""
-
-                st.balloons()
-                st.success(f"🎉 Laporan konsumen **{nama_konsumen}** oleh SPG **{str(nama_spg_manual).strip()}** berhasil disimpan!")
+                st.session_state["spg_form_nonce"] = spg_nonce + 1
+                st.session_state["spg_last_saved_msg"] = (
+                    f"🎉 Laporan konsumen **{nama_konsumen}** oleh SPG **{str(nama_spg_manual).strip()}** berhasil disimpan!"
+                )
+                st.rerun()
 else:
     if not is_inside_geofence:
         st.warning(f"🔒 Form input terkunci karena posisi GPS Anda berada di luar wilayah {st.session_state['kota_kab']}.")
