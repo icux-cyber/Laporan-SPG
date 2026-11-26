@@ -20,6 +20,7 @@ TEAM_NAMES_FILE = "master_nama_team.json"
 TEAM_BRANDS_FILE = "master_team_brand.json"
 BRANDS_FILE = "master_brand_rokok.json"
 VEHICLES_FILE = "master_plat_kendaraan.json"
+MASTER_SPG_FILE = "master_spg.json"
 CITIES = ["Surabaya", "Gresik"]
 WEEKDAYS = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
 DEFAULT_VEHICLES = ["L 1234 ABC"]
@@ -27,6 +28,17 @@ DEFAULT_BRANDS = [
     "D.Super 12", "D.76 Apel", "D.76 Apel Royal", "Black Matcha K12",
     "Djarum 76 Aksara", "Black Matcha Siro", "Black Matcha Kuro",
 ]
+
+FLAT_SCHEDULE_REQUIRED_COLS = {
+    "tanggal",
+    "nama team",
+    "nama spg 1",
+    "nama spg 2",
+    "nama supervisi",
+    "kendaraan / plat nomor",
+    "kota",
+    "sektor",
+}
 
 
 def load_schedule():
@@ -71,7 +83,7 @@ def save_details(details):
             json.dump(details, file, ensure_ascii=False, indent=2)
         return True
     except (OSError, TypeError, ValueError) as exc:
-        st.error(f"Gagal menyimpan detail kendaraan/brand jadwal: {exc}")
+        st.error(f"Gagal menyimpan detail jadwal: {exc}")
         return False
 
 
@@ -103,27 +115,6 @@ def schedule_team_names(frame, date_cols):
                 seen.add(normalized)
                 names.append(name)
     return names
-
-
-def save_team_names_from_schedule(team_names):
-    if len(team_names) > 20:
-        st.error("Jadwal memuat lebih dari 20 team. Master Nama Team hanya mendukung 20 team.")
-        return False
-    if not team_names:
-        st.error("Jadwal harus memuat minimal satu nama team aktif.")
-        return False
-
-    mapping = {
-        f"Team SPG {number}": team_names[number - 1] if number <= len(team_names) else ""
-        for number in range(1, 21)
-    }
-    try:
-        with open(TEAM_NAMES_FILE, "w", encoding="utf-8") as file:
-            json.dump(mapping, file, ensure_ascii=False, indent=2)
-        return True
-    except (OSError, TypeError, ValueError) as exc:
-        st.error(f"Gagal menyimpan master nama team dari jadwal: {exc}")
-        return False
 
 
 def brands_for_team(team):
@@ -183,6 +174,120 @@ def parse_schedule_date(value):
     return parsed.date()
 
 
+def clean_str_cell(value) -> str:
+    if pd.isna(value):
+        return ""
+    text = str(value).strip()
+    return "" if text.casefold() in {"nan", "none"} else text
+
+
+def date_column(value):
+    return pd.Timestamp(value).strftime("%Y-%m-%d 00:00:00")
+
+
+def assignment_key(work_date, city, district):
+    normalized_city = str(city).strip().casefold()
+    normalized_district = str(district).strip().casefold()
+    return f"{date_column(work_date)}|{normalized_city}|{normalized_district}"
+
+
+def assignment_details(details, work_date, city, district, team):
+    saved = details.get(assignment_key(work_date, city, district), {})
+    saved = saved if isinstance(saved, dict) else {}
+    return {
+        "team": team,
+        "spg_1": str(saved.get("spg_1", "")),
+        "spg_2": str(saved.get("spg_2", "")),
+        "supervisi": str(saved.get("supervisi", "")),
+        "vehicle": str(saved.get("vehicle", "")),
+        "brands": saved.get("brands", []) if isinstance(saved.get("brands", []), list) else [],
+    }
+
+
+def get_scheduled_vehicles(schedule_rows, work_date):
+    if schedule_rows is None or schedule_rows.empty:
+        return []
+
+    details = load_details()
+    vehicles = {}
+    for _, row in schedule_rows.iterrows():
+        saved = details.get(
+            assignment_key(work_date, row.get("Kota", ""), row.get("Kecamatan", "")),
+            {},
+        )
+        if not isinstance(saved, dict):
+            continue
+        assigned = saved.get("vehicle", "")
+        if not isinstance(assigned, str):
+            continue
+        assigned = assigned.strip()
+        if assigned.casefold() not in {"", "-", "nan", "none"}:
+            vehicles.setdefault(assigned.casefold(), assigned)
+
+    return sorted(vehicles.values(), key=str.casefold)
+
+
+def get_scheduled_personnel_for_team(team_name: str, work_date, selected_kecamatan: str = "") -> dict:
+    """
+    Mengambil data Supervisi, SPG 1, SPG 2, Plat Kendaraan, dan Brand dari jadwal_spg_detail.json
+    berdasarkan nama team dan tanggal kerja (serta opsional kecamatan/sektor).
+    """
+    details = load_details()
+    date_prefix = date_column(work_date)[:10]
+    target_team = " ".join(str(team_name or "").strip().split()).casefold()
+    target_kec = str(selected_kecamatan or "").strip().casefold()
+
+    matches = []
+    for key, item in details.items():
+        if not isinstance(item, dict):
+            continue
+        if not str(key).startswith(date_prefix):
+            continue
+        item_team = " ".join(str(item.get("team", "")).strip().split()).casefold()
+        if item_team != target_team:
+            continue
+        item_kec = str(item.get("kecamatan", "")).strip()
+        if target_kec and item_kec.casefold() != target_kec:
+            continue
+        matches.append(item)
+
+    if not matches:
+        return {
+            "found": False,
+            "supervisi": [],
+            "spg_1": [],
+            "spg_2": [],
+            "spg_all": [],
+            "vehicles": [],
+            "brands": brands_for_team(team_name),
+            "records": [],
+        }
+
+    spv_list = list(dict.fromkeys(str(m.get("supervisi", "")).strip() for m in matches if str(m.get("supervisi", "")).strip()))
+    spg1_list = list(dict.fromkeys(str(m.get("spg_1", "")).strip() for m in matches if str(m.get("spg_1", "")).strip()))
+    spg2_list = list(dict.fromkeys(str(m.get("spg_2", "")).strip() for m in matches if str(m.get("spg_2", "")).strip()))
+    spg_all = list(dict.fromkeys(spg1_list + spg2_list))
+    vehicles = list(
+        dict.fromkeys(
+            str(m.get("vehicle", "")).strip()
+            for m in matches
+            if str(m.get("vehicle", "")).strip().casefold() not in {"", "-", "nan", "none"}
+        )
+    )
+    brands = matches[0].get("brands") or brands_for_team(team_name)
+
+    return {
+        "found": True,
+        "supervisi": spv_list,
+        "spg_1": spg1_list,
+        "spg_2": spg2_list,
+        "spg_all": spg_all,
+        "vehicles": vehicles,
+        "brands": brands,
+        "records": matches,
+    }
+
+
 def parse_flat_schedule_header(column):
     label = str(column).strip()
     lowered = label.casefold()
@@ -196,14 +301,130 @@ def parse_flat_schedule_header(column):
     return parse_schedule_date(label), kind
 
 
+def _parse_flat_row_schedule_upload(uploaded_file):
+    """
+    Parser khusus format tabel baru (`Jadwal SPG 1.1_2.xlsx`):
+    Tanggal | Nama Team | Nama SPG 1 | Nama SPG 2 | Nama Supervisi | Kendaraan / Plat Nomor | Kota | Sektor
+    """
+    uploaded_file.seek(0)
+    raw_df = pd.read_excel(uploaded_file)
+    col_map = {str(c).strip().casefold(): c for c in raw_df.columns}
+
+    if not FLAT_SCHEDULE_REQUIRED_COLS.issubset(set(col_map.keys())):
+        return None
+
+    date_col_src = col_map["tanggal"]
+    team_col_src = col_map["nama team"]
+    spg1_col_src = col_map["nama spg 1"]
+    spg2_col_src = col_map["nama spg 2"]
+    spv_col_src = col_map["nama supervisi"]
+    plat_col_src = col_map["kendaraan / plat nomor"]
+    kota_col_src = col_map["kota"]
+    sektor_col_src = col_map["sektor"]
+
+    location_order = []
+    location_meta = {}
+    date_order = []
+    assignments_grid = {}
+    uploaded_details = {}
+    uploaded_vehicles = {}
+    uploaded_spgs = []
+
+    for idx, row in raw_df.iterrows():
+        row_num = idx + 2
+        raw_date = row.get(date_col_src)
+        team = clean_str_cell(row.get(team_col_src))
+        spg1 = clean_str_cell(row.get(spg1_col_src))
+        spg2 = clean_str_cell(row.get(spg2_col_src))
+        spv = clean_str_cell(row.get(spv_col_src))
+        plat = clean_str_cell(row.get(plat_col_src))
+        kota = clean_str_cell(row.get(kota_col_src))
+        sektor = clean_str_cell(row.get(sektor_col_src))
+
+        # Lewati baris kosong
+        if not any([pd.notna(raw_date), team, spg1, spg2, spv, plat, kota, sektor]):
+            continue
+
+        work_date = parse_schedule_date(raw_date)
+        if work_date is None:
+            return None, None, None, None, None, None, f"Baris {row_num}: Format Tanggal tidak valid ({raw_date})."
+        if not team or not kota or not sektor:
+            return None, None, None, None, None, None, (
+                f"Baris {row_num}: Kolom Nama Team, Kota, dan Sektor wajib diisi."
+            )
+
+        d_col = date_column(work_date)
+        if d_col not in date_order:
+            date_order.append(d_col)
+
+        loc_key = (kota.casefold(), sektor.casefold())
+        if loc_key not in location_meta:
+            location_meta[loc_key] = (kota, sektor)
+            location_order.append(loc_key)
+
+        a_key = assignment_key(work_date, kota, sektor)
+        if a_key in uploaded_details:
+            return None, None, None, None, None, None, (
+                f"Baris {row_num}: Duplikat jadwal pada tanggal {work_date.strftime('%d-%m-%Y')} "
+                f"di {kota} - {sektor}."
+            )
+
+        assignments_grid[(loc_key, d_col)] = team
+        vehicle_val = plat if plat and plat != "-" else "-"
+        uploaded_vehicles[a_key] = vehicle_val if vehicle_val != "-" else ""
+
+        if spg1:
+            uploaded_spgs.append(spg1)
+        if spg2:
+            uploaded_spgs.append(spg2)
+
+        uploaded_details[a_key] = {
+            "tanggal": work_date.strftime("%Y-%m-%d"),
+            "kota": kota,
+            "kecamatan": sektor,
+            "team": team,
+            "spg_1": spg1,
+            "spg_2": spg2,
+            "supervisi": spv,
+            "vehicle": vehicle_val if vehicle_val != "-" else "",
+            "brands": brands_for_team(team),
+        }
+
+    if not uploaded_details:
+        return None, None, None, None, None, None, "File Excel tidak memiliki baris jadwal yang aktif."
+
+    date_order.sort()
+    matrix_rows = []
+    for loc_key in location_order:
+        kota_val, sektor_val = location_meta[loc_key]
+        row_dict = {"Kota": kota_val, "Kecamatan": sektor_val}
+        for d_col in date_order:
+            row_dict[d_col] = assignments_grid.get((loc_key, d_col), "-")
+        matrix_rows.append(row_dict)
+
+    matrix_df = pd.DataFrame(matrix_rows, columns=["Kota", "Kecamatan", *date_order])
+    extra_payload = {
+        "format": "flat_personnel",
+        "details": uploaded_details,
+        "spgs": uploaded_spgs,
+    }
+    return matrix_df, "Kota", "Kecamatan", date_order, uploaded_vehicles, extra_payload, None
+
+
 def validate_schedule_upload(uploaded_file):
     try:
         uploaded_file.seek(0)
+        head_df = pd.read_excel(uploaded_file, nrows=1)
+        head_cols = {str(c).strip().casefold() for c in head_df.columns}
+        if FLAT_SCHEDULE_REQUIRED_COLS.issubset(head_cols):
+            return _parse_flat_row_schedule_upload(uploaded_file)
+
+        uploaded_file.seek(0)
         raw = pd.read_excel(uploaded_file, header=None)
     except Exception as exc:
-        return None, None, None, None, None, f"File Excel tidak dapat dibaca: {exc}"
+        return None, None, None, None, None, None, f"File Excel tidak dapat dibaca: {exc}"
     if raw.empty or len(raw.index) < 2:
-        return None, None, None, None, None, "File tidak memiliki header dan data jadwal."
+        return None, None, None, None, None, None, "File tidak memiliki header dan data jadwal."
 
     header = raw.iloc[0]
     normalized_header = {
@@ -212,9 +433,9 @@ def validate_schedule_upload(uploaded_file):
         if not pd.isna(value)
     }
     city_index = next((i for i, value in normalized_header.items() if "kota" in value), None)
-    district_index = next((i for i, value in normalized_header.items() if "kecamatan" in value), None)
+    district_index = next((i for i, value in normalized_header.items() if "kecamatan" in value or "sektor" in value), None)
     if city_index is None or district_index is None or city_index == district_index:
-        return None, None, None, None, None, "File harus memiliki kolom Kota dan Kecamatan."
+        return None, None, None, None, None, None, "File harus memiliki kolom Kota dan Kecamatan/Sektor."
 
     subheader = raw.iloc[1]
     subheader_labels = {
@@ -232,7 +453,7 @@ def validate_schedule_upload(uploaded_file):
         date_key = date_column(work_date)
         label = subheader_labels.get(index, "")
         if "kendaraan" in label or "plat" in label:
-            return None, None, None, None, None, "Kolom tanggal harus berada di atas kolom Nama Team."
+            return None, None, None, None, None, None, "Kolom tanggal harus berada di atas kolom Nama Team."
         team_index = index
         vehicle_index = None
         if "nama team" in label:
@@ -240,7 +461,7 @@ def validate_schedule_upload(uploaded_file):
             if "kendaraan" in vehicle_label or "plat" in vehicle_label:
                 vehicle_index = index + 1
         if date_key in team_indexes:
-            return None, None, None, None, None, f"Tanggal {date_key[:10]} muncul lebih dari sekali."
+            return None, None, None, None, None, None, f"Tanggal {date_key[:10]} muncul lebih dari sekali."
         team_indexes[date_key] = team_index
         if vehicle_index is not None:
             vehicle_indexes[date_key] = vehicle_index
@@ -251,16 +472,16 @@ def validate_schedule_upload(uploaded_file):
         try:
             frame = pd.read_excel(uploaded_file)
         except Exception as exc:
-            return None, None, None, None, None, f"File Excel tidak dapat dibaca: {exc}"
+            return None, None, None, None, None, None, f"File Excel tidak dapat dibaca: {exc}"
         frame.columns = [str(column).strip() for column in frame.columns]
         if not len(frame.columns) or any(not column for column in frame.columns):
-            return None, None, None, None, None, "File harus memiliki nama kolom yang valid."
+            return None, None, None, None, None, None, "File harus memiliki nama kolom yang valid."
         if len(set(frame.columns)) != len(frame.columns):
-            return None, None, None, None, None, "Nama kolom pada file tidak boleh duplikat."
+            return None, None, None, None, None, None, "Nama kolom pada file tidak boleh duplikat."
         city_col = next((col for col in frame.columns if "kota" in col.lower()), None)
-        district_col = next((col for col in frame.columns if "kecamatan" in col.lower()), None)
+        district_col = next((col for col in frame.columns if "kecamatan" in col.lower() or "sektor" in col.lower()), None)
         if not city_col or not district_col or city_col == district_col:
-            return None, None, None, None, None, "File harus memiliki kolom Kota dan Kecamatan."
+            return None, None, None, None, None, None, "File harus memiliki kolom Kota dan Kecamatan."
 
         team_columns = {}
         vehicle_indexes = {}
@@ -269,24 +490,24 @@ def validate_schedule_upload(uploaded_file):
                 continue
             work_date, column_kind = parse_flat_schedule_header(col)
             if work_date is None:
-                return None, None, None, None, None, (
+                return None, None, None, None, None, None, (
                     f"Kolom '{col}' bukan tanggal jadwal atau kolom kendaraan bertanggal yang valid."
                 )
             date_key = date_column(work_date)
             target_columns = vehicle_indexes if column_kind == "vehicle" else team_columns
             if date_key in target_columns:
                 column_label = "kendaraan/plat" if column_kind == "vehicle" else "nama team"
-                return None, None, None, None, None, (
+                return None, None, None, None, None, None, (
                     f"Kolom {column_label} untuk tanggal {date_key[:10]} muncul lebih dari sekali."
                 )
             target_columns[date_key] = col
         missing_team_dates = sorted(set(vehicle_indexes) - set(team_columns))
         if missing_team_dates:
-            return None, None, None, None, None, (
+            return None, None, None, None, None, None, (
                 f"Kolom kendaraan tidak memiliki kolom Nama Team untuk tanggal {missing_team_dates[0][:10]}."
             )
         if not team_columns:
-            return None, None, None, None, None, "File harus memiliki kolom tanggal dan Nama Team."
+            return None, None, None, None, None, None, "File harus memiliki kolom tanggal dan Nama Team."
 
         team_indexes = team_columns
         raw = frame
@@ -328,10 +549,10 @@ def validate_schedule_upload(uploaded_file):
         if not city or city.casefold() in {"nan", "none"} or not district or district.casefold() in {"nan", "none"}:
             if not has_assignment:
                 continue
-            return None, None, None, None, None, "Setiap baris jadwal aktif harus memiliki Kota dan Kecamatan."
+            return None, None, None, None, None, None, "Setiap baris jadwal aktif harus memiliki Kota dan Kecamatan."
         location = (city.casefold(), district.casefold())
         if location in seen_locations:
-            return None, None, None, None, None, f"Lokasi {city} / {district} muncul lebih dari sekali."
+            return None, None, None, None, None, None, f"Lokasi {city} / {district} muncul lebih dari sekali."
         seen_locations.add(location)
 
     uploaded_vehicles = {}
@@ -353,7 +574,7 @@ def validate_schedule_upload(uploaded_file):
                     "" if pd.isna(vehicle) else str(vehicle).strip()
                 )
 
-    return frame, city_col, district_col, date_cols, uploaded_vehicles, None
+    return frame, city_col, district_col, date_cols, uploaded_vehicles, {"format": "matrix"}, None
 
 
 def retain_matching_schedule_details(details, frame, city_col, district_col, date_cols):
@@ -384,109 +605,141 @@ def retain_matching_schedule_details(details, frame, city_col, district_col, dat
 
 
 def build_schedule_excel(schedule, details, city_col, district_col):
+    """Mengekspor jadwal aktif dalam format tabel datar lengkap (Tanggal, Team, SPG 1, SPG 2, Supervisi, Plat, Kota, Sektor)."""
     date_cols = [
         column
         for column in schedule.columns
         if column not in {city_col, district_col} and parse_schedule_date(column) is not None
     ]
-    header = [city_col, district_col]
-    subheader = [None, None]
-    normalized_date_cols = []
-    for column in date_cols:
-        work_date = parse_schedule_date(column)
-        normalized_date_cols.append((column, work_date))
-        header.extend([work_date, None])
-        subheader.extend(["Nama Team", "Kendaraan / Plat Nomor"])
-
-    rows = [header, subheader]
+    export_rows = []
     for _, source_row in schedule.iterrows():
-        city = source_row.get(city_col, "")
-        district = source_row.get(district_col, "")
-        row = [city, district]
-        for column, work_date in normalized_date_cols:
-            row.append(source_row.get(column, ""))
+        city = str(source_row.get(city_col, "")).strip()
+        district = str(source_row.get(district_col, "")).strip()
+        for column in date_cols:
+            team = source_row.get(column, "")
+            if not is_active(team):
+                continue
+            work_date = parse_schedule_date(column)
             saved = details.get(assignment_key(work_date, city, district), {})
-            vehicle = saved.get("vehicle", "") if isinstance(saved, dict) else ""
-            row.append(vehicle)
-        rows.append(row)
+            saved = saved if isinstance(saved, dict) else {}
+            export_rows.append({
+                "Tanggal": pd.Timestamp(work_date),
+                "Nama Team": str(team).strip(),
+                "Nama SPG 1": saved.get("spg_1", ""),
+                "Nama SPG 2": saved.get("spg_2", ""),
+                "Nama Supervisi": saved.get("supervisi", ""),
+                "Kendaraan / Plat Nomor": saved.get("vehicle", ""),
+                "Kota": city,
+                "Sektor": district,
+            })
+
+    cols = [
+        "Tanggal", "Nama Team", "Nama SPG 1", "Nama SPG 2",
+        "Nama Supervisi", "Kendaraan / Plat Nomor", "Kota", "Sektor",
+    ]
+    df_export = pd.DataFrame(export_rows, columns=cols)
+    if not df_export.empty:
+        df_export = df_export.sort_values(by=["Tanggal", "Kota", "Sektor"]).reset_index(drop=True)
 
     buffer = BytesIO()
-    pd.DataFrame(rows).to_excel(buffer, index=False, header=False)
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df_export.to_excel(writer, sheet_name="Sheet1", index=False)
+        ws = writer.sheets["Sheet1"]
+        for row_idx in range(2, len(df_export) + 2):
+            ws.cell(row=row_idx, column=1).number_format = "yyyy-mm-dd"
     return buffer.getvalue()
 
+
 def build_schedule_template_excel(week_anchor):
+    """Membuat template Excel format baru lengkap dengan dropdown Master Team dan Plat Kendaraan."""
     week_start = week_anchor - timedelta(days=week_anchor.weekday())
     workdays = [week_start + timedelta(days=offset) for offset in range(5)]
-    locations = [
-        (city, district)
-        for city in CITIES
-        for district in get_geo_districts(city)
-    ]
+    teams = team_choices()
+    vehicles = vehicle_choices()
 
-    header = ["Kota", "Kecamatan"]
-    subheader = ["", ""]
+    sample_rows = []
     for workday in workdays:
-        header.extend([workday, None])
-        subheader.extend(["Nama Team", "Kendaraan / Plat Nomor"])
+        for team in teams[:4]:
+            sample_rows.append({
+                "Tanggal": pd.Timestamp(workday),
+                "Nama Team": team,
+                "Nama SPG 1": "",
+                "Nama SPG 2": "",
+                "Nama Supervisi": "",
+                "Kendaraan / Plat Nomor": vehicles[0] if vehicles else "",
+                "Kota": "Surabaya",
+                "Sektor": "",
+            })
 
-    rows = [header, subheader]
-    rows.extend([[city, district, *("" for _ in range(len(workdays) * 2))] for city, district in locations])
+    cols = [
+        "Tanggal", "Nama Team", "Nama SPG 1", "Nama SPG 2",
+        "Nama Supervisi", "Kendaraan / Plat Nomor", "Kota", "Sektor",
+    ]
+    df_tpl = pd.DataFrame(sample_rows, columns=cols)
 
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        pd.DataFrame(rows).to_excel(
-            writer, sheet_name="Jadwal SPG", index=False, header=False
-        )
+        df_tpl.to_excel(writer, sheet_name="Sheet1", index=False)
         workbook = writer.book
         master_sheet = workbook.create_sheet("Master")
         master_sheet["A1"] = "Nama Team"
         master_sheet["B1"] = "Plat Kendaraan"
-        teams = team_choices()
-        vehicles = vehicle_choices()
         for row_number, team in enumerate(teams, start=2):
             master_sheet.cell(row=row_number, column=1, value=team)
         for row_number, vehicle in enumerate(vehicles, start=2):
             master_sheet.cell(row=row_number, column=2, value=vehicle)
         master_sheet.sheet_state = "hidden"
 
-        worksheet = writer.sheets["Jadwal SPG"]
-        worksheet.freeze_panes = "C3"
-        worksheet.column_dimensions["A"].width = 18
-        worksheet.column_dimensions["B"].width = 24
-        for column_number in range(3, len(header) + 1):
-            worksheet.column_dimensions[
-                openpyxl.utils.get_column_letter(column_number)
-            ].width = 22
+        ws = writer.sheets["Sheet1"]
+        ws.freeze_panes = "A2"
+        widths = [14, 22, 18, 18, 18, 22, 14, 20]
+        for idx, width in enumerate(widths, start=1):
+            ws.column_dimensions[openpyxl.utils.get_column_letter(idx)].width = width
+        for row_idx in range(2, len(df_tpl) + 2):
+            ws.cell(row=row_idx, column=1).number_format = "yyyy-mm-dd"
 
-        if locations:
-            last_row = len(rows)
-            team_last_row = max(2, len(teams) + 1)
-            vehicle_last_row = max(2, len(vehicles) + 1)
-            team_validation = openpyxl.worksheet.datavalidation.DataValidation(
-                type="list",
-                formula1=f'=INDIRECT("\'Master\'!$A$2:$A${team_last_row}")',
-                allow_blank=True,
-            )
-            vehicle_validation = openpyxl.worksheet.datavalidation.DataValidation(
-                type="list",
-                formula1=f'=INDIRECT("\'Master\'!$B$2:$B${vehicle_last_row}")',
-                allow_blank=True,
-            )
-            worksheet.add_data_validation(team_validation)
-            worksheet.add_data_validation(vehicle_validation)
-            for column_number in range(3, len(header) + 1, 2):
-                team_validation.add(
-                    f"{openpyxl.utils.get_column_letter(column_number)}3:"
-                    f"{openpyxl.utils.get_column_letter(column_number)}{last_row}"
-                )
-                vehicle_validation.add(
-                    f"{openpyxl.utils.get_column_letter(column_number + 1)}3:"
-                    f"{openpyxl.utils.get_column_letter(column_number + 1)}{last_row}"
-                )
+        last_row = max(50, len(df_tpl) + 1)
+        team_last_row = max(2, len(teams) + 1)
+        vehicle_last_row = max(2, len(vehicles) + 1)
+        team_validation = openpyxl.worksheet.datavalidation.DataValidation(
+            type="list",
+            formula1=f'=INDIRECT("\'Master\'!$A$2:$A${team_last_row}")',
+            allow_blank=True,
+        )
+        vehicle_validation = openpyxl.worksheet.datavalidation.DataValidation(
+            type="list",
+            formula1=f'=INDIRECT("\'Master\'!$B$2:$B${vehicle_last_row}")',
+            allow_blank=True,
+        )
+        ws.add_data_validation(team_validation)
+        ws.add_data_validation(vehicle_validation)
+        team_validation.add(f"B2:B{last_row}")
+        vehicle_validation.add(f"F2:F{last_row}")
 
     return output.getvalue()
 
-def build_schedule_preview(frame, details, city_col, district_col, date_cols, uploaded_vehicles):
+
+def build_schedule_preview(frame, details, city_col, district_col, date_cols, uploaded_vehicles, extra_payload=None):
+    if isinstance(extra_payload, dict) and extra_payload.get("format") == "flat_personnel":
+        flat_details = extra_payload.get("details", {})
+        preview_rows = []
+        for _, item in flat_details.items():
+            preview_rows.append({
+                "Tanggal": item.get("tanggal", ""),
+                "Nama Team": item.get("team", ""),
+                "Nama SPG 1": item.get("spg_1", "") or "-",
+                "Nama SPG 2": item.get("spg_2", "") or "-",
+                "Nama Supervisi": item.get("supervisi", "") or "-",
+                "Kendaraan / Plat Nomor": item.get("vehicle", "") or "-",
+                "Kota": item.get("kota", ""),
+                "Sektor": item.get("kecamatan", ""),
+                "Rokok (Otomatis)": ", ".join(item.get("brands", [])),
+            })
+        df_prev = pd.DataFrame(preview_rows)
+        if not df_prev.empty:
+            df_prev = df_prev.sort_values(by=["Tanggal", "Kota", "Sektor"]).reset_index(drop=True)
+        return df_prev
+
     preview_rows = []
     preview_columns = [city_col, district_col]
     for date_col in date_cols:
@@ -514,49 +767,6 @@ def build_schedule_preview(frame, details, city_col, district_col, date_cols, up
         preview_rows.append(preview_row)
 
     return pd.DataFrame(preview_rows, columns=preview_columns)
-
-
-def date_column(value):
-    return pd.Timestamp(value).strftime("%Y-%m-%d 00:00:00")
-
-
-def assignment_key(work_date, city, district):
-    normalized_city = str(city).strip().casefold()
-    normalized_district = str(district).strip().casefold()
-    return f"{date_column(work_date)}|{normalized_city}|{normalized_district}"
-
-
-def assignment_details(details, work_date, city, district, team):
-    saved = details.get(assignment_key(work_date, city, district), {})
-    saved = saved if isinstance(saved, dict) else {}
-    return {
-        "team": team,
-        "vehicle": str(saved.get("vehicle", "")),
-        "brands": saved.get("brands", []) if isinstance(saved.get("brands", []), list) else [],
-    }
-
-
-def get_scheduled_vehicles(schedule_rows, work_date):
-    if schedule_rows is None or schedule_rows.empty:
-        return []
-
-    details = load_details()
-    vehicles = {}
-    for _, row in schedule_rows.iterrows():
-        saved = details.get(
-            assignment_key(work_date, row.get("Kota", ""), row.get("Kecamatan", "")),
-            {},
-        )
-        if not isinstance(saved, dict):
-            continue
-        assigned = saved.get("vehicle", "")
-        if not isinstance(assigned, str):
-            continue
-        assigned = assigned.strip()
-        if assigned.casefold() not in {"", "-", "nan", "none"}:
-            vehicles.setdefault(assigned.casefold(), assigned)
-
-    return sorted(vehicles.values(), key=str.casefold)
 
 
 def week_info(value):
@@ -609,11 +819,17 @@ def add_assignments(frame, city_col, district_col, dates, city, districts, team)
     return frame, []
 
 
-def store_assignment_details(details, dates, city, districts, team, vehicle, brands):
+def store_assignment_details(details, dates, city, districts, team, vehicle, brands, spg_1="", spg_2="", supervisi=""):
     for workday in dates:
         for district in districts:
             details[assignment_key(workday, city, district)] = {
+                "tanggal": pd.Timestamp(workday).strftime("%Y-%m-%d"),
+                "kota": city,
+                "kecamatan": district,
                 "team": team,
+                "spg_1": str(spg_1 or "").strip(),
+                "spg_2": str(spg_2 or "").strip(),
+                "supervisi": str(supervisi or "").strip(),
                 "vehicle": vehicle,
                 "brands": list(brands),
             }
@@ -627,7 +843,6 @@ def render_schedule_entry():
     teams = team_choices()
     vehicles = vehicle_choices()
 
-    # Scheduling, management, and Excel import/export share the same schedule data.
     tab_day, tab_week, tab_manage, tab_excel = st.tabs(
         [
             "➕ Tambah Hari Kerja",
@@ -639,7 +854,7 @@ def render_schedule_entry():
 
     with tab_day:
         st.markdown("#### Buat jadwal untuk satu hari")
-        st.caption("Data team, merek rokok, dan kendaraan diambil dari master data.")
+        st.caption("Data team, personel SPG/Supervisi, merek rokok, dan kendaraan tersimpan otomatis.")
         with st.form("form_add_schedule_day"):
             col_date, col_city, col_team = st.columns(3)
             with col_date:
@@ -648,7 +863,16 @@ def render_schedule_entry():
                 city = st.selectbox("Kota / Kabupaten", CITIES, key="new_workday_city")
             with col_team:
                 team = st.selectbox("Master Team SPG", teams, key="new_workday_team")
-            districts = st.multiselect("Kecamatan yang dijadwalkan", get_geo_districts(city), key="new_workday_districts")
+
+            col_spv, col_spg1, col_spg2 = st.columns(3)
+            with col_spv:
+                supervisi_name = st.text_input("Nama Supervisi", key="new_workday_spv")
+            with col_spg1:
+                spg1_name = st.text_input("Nama SPG 1", key="new_workday_spg1")
+            with col_spg2:
+                spg2_name = st.text_input("Nama SPG 2", key="new_workday_spg2")
+
+            districts = st.multiselect("Sektor / Kecamatan yang dijadwalkan", get_geo_districts(city), key="new_workday_districts")
             col_vehicle, col_brands = st.columns(2)
             with col_vehicle:
                 vehicle = st.selectbox("Kendaraan / Plat Nomor", vehicles, key="new_workday_vehicle")
@@ -663,7 +887,7 @@ def render_schedule_entry():
             submit_day = st.form_submit_button("💾 Simpan Jadwal Hari Ini", type="primary")
         if submit_day:
             if not districts:
-                st.warning("Pilih minimal satu kecamatan terlebih dahulu.")
+                st.warning("Pilih minimal satu sektor/kecamatan terlebih dahulu.")
             elif not brands:
                 st.warning("Pilih minimal satu merek rokok yang dibawa.")
             else:
@@ -671,14 +895,17 @@ def render_schedule_entry():
                 if conflicts:
                     st.error("Sudah ada jadwal pada lokasi dan tanggal berikut: " + ", ".join(conflicts))
                 elif save_schedule(updated):
-                    details = store_assignment_details(details, [work_date], city, districts, team, vehicle, brands)
+                    details = store_assignment_details(
+                        details, [work_date], city, districts, team, vehicle, brands,
+                        spg_1=spg1_name, spg_2=spg2_name, supervisi=supervisi_name,
+                    )
                     if save_details(details):
-                        st.success(f"Jadwal {team} tersimpan untuk {len(districts)} kecamatan, termasuk kendaraan dan brand.")
+                        st.success(f"Jadwal {team} tersimpan untuk {len(districts)} sektor, termasuk Supervisi, SPG & brand.")
                     st.rerun()
 
     with tab_week:
         st.markdown("#### Buat jadwal satu minggu")
-        st.caption("Pilih hari kerja, kecamatan, team, merek yang dibawa, dan kendaraan. Jadwal yang bentrok tidak akan ditimpa.")
+        st.caption("Pilih hari kerja, sektor/kecamatan, team, personel, merek, dan kendaraan.")
         with st.form("form_add_schedule_week"):
             col_anchor, col_city, col_team = st.columns(3)
             with col_anchor:
@@ -689,9 +916,18 @@ def render_schedule_entry():
                 week_city = st.selectbox("Kota / Kabupaten", CITIES, key="new_week_city")
             with col_team:
                 week_team = st.selectbox("Master Team SPG", teams, key="new_week_team")
+
+            col_w_spv, col_w_spg1, col_w_spg2 = st.columns(3)
+            with col_w_spv:
+                week_spv = st.text_input("Nama Supervisi", key="new_week_spv")
+            with col_w_spg1:
+                week_spg1 = st.text_input("Nama SPG 1", key="new_week_spg1")
+            with col_w_spg2:
+                week_spg2 = st.text_input("Nama SPG 2", key="new_week_spg2")
+
             st.info(f"Periode minggu: {week_start.strftime('%d %b %Y')} – {week_end.strftime('%d %b %Y')}")
             workdays = st.multiselect("Hari kerja", WEEKDAYS, default=WEEKDAYS[:5], key="new_week_days")
-            week_districts = st.multiselect("Kecamatan yang dijadwalkan", get_geo_districts(week_city), key="new_week_districts")
+            week_districts = st.multiselect("Sektor / Kecamatan yang dijadwalkan", get_geo_districts(week_city), key="new_week_districts")
             col_vehicle_week, col_brands_week = st.columns(2)
             with col_vehicle_week:
                 week_vehicle = st.selectbox("Kendaraan / Plat Nomor", vehicles, key="new_week_vehicle")
@@ -703,7 +939,7 @@ def render_schedule_entry():
             submit_week = st.form_submit_button("🗓️ Buat Jadwal Mingguan", type="primary")
         if submit_week:
             if not workdays or not week_districts:
-                st.warning("Pilih minimal satu hari kerja dan satu kecamatan.")
+                st.warning("Pilih minimal satu hari kerja dan satu sektor/kecamatan.")
             elif not week_brands:
                 st.warning("Pilih minimal satu merek rokok yang dibawa.")
             else:
@@ -716,7 +952,8 @@ def render_schedule_entry():
                     st.error("Ada jadwal yang sudah terisi. Tidak ada perubahan yang disimpan: " + ", ".join(conflicts))
                 elif save_schedule(updated):
                     details = store_assignment_details(
-                        details, selected_dates, week_city, week_districts, week_team, week_vehicle, week_brands
+                        details, selected_dates, week_city, week_districts, week_team, week_vehicle, week_brands,
+                        spg_1=week_spg1, spg_2=week_spg2, supervisi=week_spv,
                     )
                     if save_details(details):
                         st.success(f"Berhasil membuat {len(selected_dates) * len(week_districts)} penugasan untuk {week_team}.")
@@ -724,7 +961,7 @@ def render_schedule_entry():
 
     with tab_manage:
         st.markdown("#### Jadwal aktif")
-        st.caption("Master team, alokasi merek, dan data kendaraan ditampilkan pada setiap penugasan.")
+        st.caption("Master team, personel Supervisi/SPG, alokasi merek, dan kendaraan ditampilkan pada setiap penugasan.")
         date_cols = [col for col in schedule.columns if col not in {city_col, district_col}]
         entries = []
         for row_index, row in schedule.iterrows():
@@ -741,11 +978,12 @@ def render_schedule_entry():
                     "row": row_index, "date_col": date_col, "date": parsed_date.date(),
                     "week": label, "week_sort": sort_key, "city": city_value,
                     "district": district_value, "team": team_value,
+                    "spg_1": saved["spg_1"], "spg_2": saved["spg_2"], "supervisi": saved["supervisi"],
                     "vehicle": saved["vehicle"], "brands": saved["brands"],
                 })
 
         if not entries:
-            st.info("Belum ada jadwal aktif. Gunakan tab **Tambah Hari Kerja** atau **Tambah Minggu Kerja** untuk mulai.")
+            st.info("Belum ada jadwal aktif. Gunakan tab **Tambah Hari Kerja**, **Tambah Minggu Kerja**, atau **Upload Excel**.")
         else:
             weeks_by_sort = {entry["week_sort"]: entry["week"] for entry in entries}
             week_labels = [weeks_by_sort[key] for key in sorted(weeks_by_sort, reverse=True)]
@@ -762,10 +1000,11 @@ def render_schedule_entry():
                 entry_id = f"{entry['row']}_{entry['date_col']}"
                 team_widget_key = f"team_{entry_id}_{entry['team']}"
                 vehicle_widget_key = f"vehicle_{entry_id}_{entry['vehicle']}"
+                spg_caption = " & ".join([x for x in [entry["spg_1"], entry["spg_2"]] if x]) or "Belum diatur"
                 heading = (
                     f"{entry['date'].strftime('%d-%m-%Y')} · "
-                    f"{entry['district'] or 'Kecamatan belum diisi'} · {entry['team']} · "
-                    f"Plat: {entry['vehicle'] or 'Belum diatur'}"
+                    f"{entry['district'] or 'Sektor belum diisi'} · {entry['team']} · "
+                    f"SPV: {entry['supervisi'] or '-'} · SPG: {spg_caption}"
                 )
                 with st.expander(f"📍 {heading}", expanded=False):
                     brands_allowed = brands_for_team(entry["team"])
@@ -773,7 +1012,11 @@ def render_schedule_entry():
                     entry_teams = teams if entry["team"] in teams else [entry["team"], *teams]
                     entry_vehicles = vehicles if entry["vehicle"] in vehicles else [entry["vehicle"], *vehicles]
                     saved_vehicle = entry["vehicle"] or vehicles[0]
-                    st.caption(f"{entry['week']} · Kendaraan: {entry['vehicle'] or 'Belum diatur'} · Brand: {', '.join(entry['brands']) or 'Belum diatur'}")
+                    st.caption(
+                        f"{entry['week']} · Supervisi: {entry['supervisi'] or '-'} · "
+                        f"SPG 1: {entry['spg_1'] or '-'} · SPG 2: {entry['spg_2'] or '-'} · "
+                        f"Plat: {entry['vehicle'] or '-'}"
+                    )
                     with st.form(f"edit_schedule_{entry_id}"):
                         col_date_edit, col_city_edit = st.columns(2)
                         with col_date_edit:
@@ -786,14 +1029,23 @@ def render_schedule_entry():
                             district_options = get_geo_districts(edited_city)
                             district_index = district_options.index(entry["district"]) if entry["district"] in district_options else None
                             if district_index is None:
-                                edited_district = st.text_input("Kecamatan", value=entry["district"], key=f"district_{entry_id}")
+                                edited_district = st.text_input("Sektor / Kecamatan", value=entry["district"], key=f"district_{entry_id}")
                             else:
-                                edited_district = st.selectbox("Kecamatan", district_options, index=district_index, key=f"district_{entry_id}")
+                                edited_district = st.selectbox("Sektor / Kecamatan", district_options, index=district_index, key=f"district_{entry_id}")
                         with col_team_edit:
                             edited_team = st.selectbox(
                                 "Master Team SPG", entry_teams,
                                 index=entry_teams.index(entry["team"]), key=team_widget_key,
                             )
+
+                        col_spv_e, col_spg1_e, col_spg2_e = st.columns(3)
+                        with col_spv_e:
+                            edited_spv = st.text_input("Nama Supervisi", value=entry["supervisi"], key=f"spv_{entry_id}")
+                        with col_spg1_e:
+                            edited_spg1 = st.text_input("Nama SPG 1", value=entry["spg_1"], key=f"spg1_{entry_id}")
+                        with col_spg2_e:
+                            edited_spg2 = st.text_input("Nama SPG 2", value=entry["spg_2"], key=f"spg2_{entry_id}")
+
                         col_vehicle_edit, col_brands_edit = st.columns(2)
                         with col_vehicle_edit:
                             edited_vehicle = st.selectbox(
@@ -813,7 +1065,7 @@ def render_schedule_entry():
 
                     if save_clicked:
                         if not str(edited_district).strip():
-                            st.warning("Kecamatan wajib diisi.")
+                            st.warning("Sektor / Kecamatan wajib diisi.")
                         elif not edited_brands:
                             st.warning("Pilih minimal satu merek rokok.")
                         else:
@@ -829,7 +1081,7 @@ def render_schedule_entry():
                                 and destination_row == entry["row"]
                             )
                             if not same_assignment and is_active(destination_value):
-                                st.error("Tanggal dan kecamatan tujuan sudah memiliki jadwal aktif. Pilih tujuan lain.")
+                                st.error("Tanggal dan sektor tujuan sudah memiliki jadwal aktif. Pilih tujuan lain.")
                             else:
                                 if destination_col not in schedule.columns:
                                     schedule[destination_col] = "-"
@@ -849,19 +1101,25 @@ def render_schedule_entry():
                                 if old_key != new_key:
                                     details.pop(old_key, None)
                                 details[new_key] = {
+                                    "tanggal": pd.Timestamp(edited_date).strftime("%Y-%m-%d"),
+                                    "kota": edited_city,
+                                    "kecamatan": edited_district.strip(),
                                     "team": edited_team,
+                                    "spg_1": str(edited_spg1).strip(),
+                                    "spg_2": str(edited_spg2).strip(),
+                                    "supervisi": str(edited_spv).strip(),
                                     "vehicle": edited_vehicle,
                                     "brands": list(edited_brands),
                                 }
                                 if save_schedule(schedule) and save_details(details):
-                                    st.success("Jadwal, team, kendaraan, dan brand berhasil diperbarui.")
+                                    st.success("Jadwal, personel, kendaraan, dan brand berhasil diperbarui.")
                                     st.rerun()
 
                     if delete_clicked:
                         schedule.at[entry["row"], entry["date_col"]] = "-"
                         details.pop(assignment_key(entry["date"], entry["city"], entry["district"]), None)
                         if save_schedule(schedule) and save_details(details):
-                            st.success("Jadwal dan detail kendaraan/brand berhasil dihapus.")
+                            st.success("Jadwal berhasil dihapus.")
                             st.rerun()
 
     if st.button("🔄 Muat Ulang Jadwal", key="reload_schedule"):
@@ -870,10 +1128,9 @@ def render_schedule_entry():
     with tab_excel:
         st.markdown("#### Unduh dan unggah jadwal melalui Excel")
         st.caption(
-            "Unggah jadwal dengan kolom Kota dan Kecamatan serta kolom tanggal untuk Nama Team dan "
-            "Kendaraan / Plat Nomor. Nilai team dan plat akan otomatis mengisi Jadwal Aktif. "
-            "Unggah akan mengganti seluruh jadwal aktif setelah Anda memeriksa pratinjau. "
-            "Detail kendaraan/brand dipertahankan untuk penugasan yang tetap sama."
+            "Mendukung file format baru dengan kolom: Tanggal, Nama Team, Nama SPG 1, Nama SPG 2, "
+            "Nama Supervisi, Kendaraan / Plat Nomor, Kota, dan Sektor. "
+            "Nama Supervisi, SPG 1 & SPG 2 akan otomatis tampil di portal sesuai jadwal."
         )
 
         template_anchor = st.date_input(
@@ -881,12 +1138,8 @@ def render_schedule_entry():
             value=date.today(),
             key="schedule_template_week",
         )
-        st.caption(
-            "Template berisi seluruh kecamatan Surabaya dan Gresik untuk Senin–Jumat "
-            "pada minggu terpilih. Nama team dan plat kendaraan tersedia sebagai pilihan."
-        )
         st.download_button(
-            "📄 Download Template Jadwal SPG",
+            "📄 Download Template Jadwal SPG (Format Baru)",
             data=build_schedule_template_excel(template_anchor),
             file_name="Template Jadwal SPG.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -915,6 +1168,7 @@ def render_schedule_entry():
                 upload_district_col,
                 upload_date_cols,
                 uploaded_vehicles,
+                extra_payload,
                 upload_error,
             ) = validate_schedule_upload(uploaded_file)
             if upload_error:
@@ -929,6 +1183,7 @@ def render_schedule_entry():
                         upload_district_col,
                         upload_date_cols,
                         uploaded_vehicles,
+                        extra_payload=extra_payload,
                     ),
                     use_container_width=True,
                     hide_index=True,
@@ -944,54 +1199,64 @@ def render_schedule_entry():
                     type="primary",
                     key="confirm_schedule_excel_upload",
                 ) and 0 < len(uploaded_team_names) <= 20:
-                    updated_details = retain_matching_schedule_details(
-                        load_details(),
-                        upload_frame,
-                        upload_city_col,
-                        upload_district_col,
-                        upload_date_cols,
-                    )
-                    if uploaded_vehicles:
-                        for _, row in upload_frame.iterrows():
-                            city = str(row.get(upload_city_col, "")).strip()
-                            district = str(row.get(upload_district_col, "")).strip()
-                            if not city or not district:
-                                continue
-                            for date_col in upload_date_cols:
-                                team = row.get(date_col)
-                                if not is_active(team):
+                    if isinstance(extra_payload, dict) and extra_payload.get("format") == "flat_personnel":
+                        updated_details = extra_payload.get("details", {})
+                        uploaded_spg_list = extra_payload.get("spgs", [])
+                    else:
+                        uploaded_spg_list = []
+                        updated_details = retain_matching_schedule_details(
+                            load_details(),
+                            upload_frame,
+                            upload_city_col,
+                            upload_district_col,
+                            upload_date_cols,
+                        )
+                        if uploaded_vehicles:
+                            for _, row in upload_frame.iterrows():
+                                city = str(row.get(upload_city_col, "")).strip()
+                                district = str(row.get(upload_district_col, "")).strip()
+                                if not city or not district:
                                     continue
-                                work_date = parse_schedule_date(date_col)
-                                key = assignment_key(work_date, city, district)
-                                if key not in uploaded_vehicles:
-                                    continue
-                                saved = updated_details.get(key, {})
-                                saved = saved.copy() if isinstance(saved, dict) else {}
-                                saved["team"] = str(team).strip()
-                                saved["vehicle"] = uploaded_vehicles[key]
-                                if not saved.get("brands"):
-                                    saved["brands"] = brands_for_team(saved["team"])
-                                updated_details[key] = saved
+                                for date_col in upload_date_cols:
+                                    team = row.get(date_col)
+                                    if not is_active(team):
+                                        continue
+                                    work_date = parse_schedule_date(date_col)
+                                    key = assignment_key(work_date, city, district)
+                                    if key not in uploaded_vehicles:
+                                        continue
+                                    saved = updated_details.get(key, {})
+                                    saved = saved.copy() if isinstance(saved, dict) else {}
+                                    saved["team"] = str(team).strip()
+                                    saved["vehicle"] = uploaded_vehicles[key]
+                                    if not saved.get("brands"):
+                                        saved["brands"] = brands_for_team(saved["team"])
+                                    updated_details[key] = saved
+
                     if save_schedule(upload_frame):
                         if save_details(updated_details):
                             sync_ok, sync_info = sync_masters_from_schedule_upload(
                                 uploaded_team_names=uploaded_team_names,
                                 uploaded_vehicles=uploaded_vehicles,
+                                uploaded_spgs=uploaded_spg_list,
                                 team_names_file=TEAM_NAMES_FILE,
                                 team_brands_file=TEAM_BRANDS_FILE,
                                 vehicles_file=VEHICLES_FILE,
                                 brands_file=BRANDS_FILE,
+                                spg_file=MASTER_SPG_FILE,
                             )
                             if sync_ok:
                                 added_plats = sync_info.get("added_vehicles", [])
-                                plat_msg = (
-                                    f" serta {len(added_plats)} plat kendaraan baru ditambahkan ke Master Plat"
-                                    if added_plats
-                                    else ""
-                                )
+                                added_spgs = sync_info.get("added_spgs", [])
+                                extra_msgs = []
+                                if added_plats:
+                                    extra_msgs.append(f"{len(added_plats)} plat kendaraan baru")
+                                if added_spgs:
+                                    extra_msgs.append(f"{len(added_spgs)} nama SPG baru")
+                                extra_str = f" serta {', '.join(extra_msgs)} ditambahkan" if extra_msgs else ""
                                 st.success(
                                     f"Jadwal berhasil diperbarui. {len(uploaded_team_names)} nama team "
-                                    f"dan alokasi brand otomatis disinkronkan{plat_msg}."
+                                    f"dan alokasi brand otomatis disinkronkan{extra_str}."
                                 )
                                 st.rerun()
                             st.error(
@@ -999,6 +1264,5 @@ def render_schedule_entry():
                             )
                         else:
                             st.error(
-                                "Jadwal berhasil diperbarui, tetapi sinkronisasi detail kendaraan/brand gagal. "
-                                "Periksa kembali detail jadwal."
+                                "Jadwal berhasil diperbarui, tetapi sinkronisasi detail jadwal gagal."
                             )
