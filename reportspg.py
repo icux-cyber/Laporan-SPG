@@ -2690,13 +2690,11 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
 
             if not kecamatan_peta_terpilih:
                 st.caption("ℹ️ Tidak ada kecamatan yang dipilih pada filter poligon—poligon tidak digambar (titik & rute tetap tampil).")
-	    if len(kecamatan_peta_terpilih) > 8:
-    		st.warning("⚠️ Maksimal 8 kecamatan untuk performa optimal. Menampilkan 8 			pertama.")
-		kecamatan_peta_terpilih = kecamatan_peta_terpilih[:8]
+            if len(kecamatan_peta_terpilih) > 8:
+                st.warning("⚠️ Maksimal 8 kecamatan untuk performa optimal. Menampilkan 8 pertama.")
+                kecamatan_peta_terpilih = kecamatan_peta_terpilih[:8]
 
-	    features_gabungan = build_polygon_features(tuple(kecamatan_peta_terpilih))
-
-            
+            features_gabungan = build_polygon_features(tuple(kecamatan_peta_terpilih))            
 
             if features_gabungan:
                 layers_list.append(
