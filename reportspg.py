@@ -1385,16 +1385,29 @@ def clean_brand_target_name(brand):
 
 def get_group_target(group_name, target_key, default_val):
     for brand, rule in TARGET_RULES.items():
-        if rule.get("group") == group_name and target_key in rule:
+        rule_group = rule.get("group")
+        if rule_group == "Black_Siro_Kuro":
+            rule_group = "Black_Matcha"
+        if rule_group == group_name and target_key in rule:
             return rule[target_key]
     return default_val
 
 
 def get_target_for_brand(brand, target_key, default_val):
-    rule = get_brand_target_rule(brand)
+    brand_str = str(brand or "").strip()
+    if not brand_str:
+        return default_val
+
+    for group_key, label in TARGET_GROUP_LABELS.items():
+        if brand_str.casefold() == label.casefold():
+            canonical_group = "Black_Matcha" if group_key == "Black_Siro_Kuro" else group_key
+            return get_group_target(canonical_group, target_key, default_val)
+
+    rule = get_brand_target_rule(brand_str)
     group = rule.get("group")
     if group:
-        return get_group_target(group, target_key, default_val)
+        canonical_group = "Black_Matcha" if group == "Black_Siro_Kuro" else group
+        return get_group_target(canonical_group, target_key, default_val)
     return rule.get(target_key, default_val)
 
 
