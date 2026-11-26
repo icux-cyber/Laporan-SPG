@@ -11,12 +11,26 @@ from shapely.geometry import Point
 import streamlit as st
 from streamlit_js_eval import get_geolocation
 
-from schedule_entry import (
-    SCHEDULE_DETAIL_FILE,
-    get_scheduled_personnel_for_team,
-    get_scheduled_vehicles,
-    render_schedule_entry,
-)
+try:
+    from schedule_entry import (
+        SCHEDULE_DETAIL_FILE,
+        get_scheduled_personnel_for_team,
+        get_scheduled_vehicles,
+        render_schedule_entry,
+    )
+except ImportError:
+    from schedule_entry import SCHEDULE_DETAIL_FILE, get_scheduled_vehicles, render_schedule_entry
+
+    def get_scheduled_personnel_for_team(team_name, target_date=None, selected_kecamatan=""):
+        return {
+            "found": False,
+            "supervisi": [],
+            "spg_1": [],
+            "spg_2": [],
+            "spg_all": [],
+            "vehicles": [],
+            "records": [],
+        }
 from team_brand_sync import (
     match_brands_by_team_name,
     resolve_team_allowed_brands,
