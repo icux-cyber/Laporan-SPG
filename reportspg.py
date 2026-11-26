@@ -1146,6 +1146,18 @@ def load_master_wilayah(kota):
         return None
 
 
+def get_geo_districts(kota: str) -> list[str]:
+    gdf = load_master_wilayah(kota)
+    if gdf is None or gdf.empty:
+        return []
+    for col in ["nm_kecamatan", "KECAMATAN", "kecamatan", "Name", "NAME"]:
+        if col in gdf.columns:
+            return sorted(
+                {str(v).strip() for v in gdf[col].dropna().tolist() if str(v).strip()}
+            )
+    return []
+
+
 # ====================================================
 # MASTER BRAND / TARGET / TEAM / PLAT / NAMA TEAM
 # ====================================================
