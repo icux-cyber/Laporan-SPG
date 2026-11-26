@@ -2584,13 +2584,30 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             if not default_kec_peta and opsi_kec_peta:
                 default_kec_peta = opsi_kec_peta[:3]
 
-            kecamatan_peta_terpilih = st.multiselect(
-                "Poligon Kecamatan Ditampilkan (On-Demand)",
-                options=opsi_kec_peta,
-                default=default_kec_peta,
-                key="peta_filter_kecamatan_geojson",
-                help="Memuat file GeoJSON per kecamatan secara on-demand agar peta cepat dan ringan.",
-            )
+            if "peta_filter_kecamatan_geojson" not in st.session_state:
+                st.session_state["peta_filter_kecamatan_geojson"] = default_kec_peta
+            else:
+                st.session_state["peta_filter_kecamatan_geojson"] = [
+                    x for x in st.session_state["peta_filter_kecamatan_geojson"]
+                    if x in opsi_kec_peta
+                ]
+
+            col_poly_sel, col_poly_reset = st.columns([0.78, 0.22])
+            with col_poly_sel:
+                kecamatan_peta_terpilih = st.multiselect(
+                    "Poligon Kecamatan Ditampilkan (On-Demand)",
+                    options=opsi_kec_peta,
+                    key="peta_filter_kecamatan_geojson",
+                    help="Memuat file GeoJSON per kecamatan secara on-demand agar peta cepat dan ringan.",
+                )
+            with col_poly_reset:
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                if st.button("🔄 Reset Poligon", key="btn_reset_peta_polygon", use_container_width=True):
+                    st.session_state["peta_filter_kecamatan_geojson"] = default_kec_peta
+                    st.rerun()
+
+            if not kecamatan_peta_terpilih:
+                st.caption("ℹ️ Tidak ada kecamatan yang dipilih pada filter poligon—poligon tidak digambar (titik & rute tetap tampil).")
 
             gresik_set = {k.casefold() for k in KECAMATAN_BY_KOTA["Gresik"]}
             features_gabungan = []
