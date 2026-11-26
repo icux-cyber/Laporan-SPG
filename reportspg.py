@@ -2932,32 +2932,6 @@ with col_banner:
         """,
         unsafe_allow_html=True,
     )
-    st.stop()
-
-# ====================================================
-# APLIKASI UTAMA SETELAH LOGIN (TEMA DINAMIS PER TEAM)
-# ====================================================
-apply_team_theme_css(st.session_state["user_spg"])
-
-col_banner, col_logout = st.columns([0.8, 0.2])
-
-with col_banner:
-    mode_badge = "👀 Supervisi" if st.session_state["login_mode"] == "Supervisi" else "📝 SPG"
-    st.markdown(
-        f"""
-        <div class="user-banner">
-            <div class="user-banner-title">
-                <span>👤 {st.session_state['user_spg']}</span>
-                <span class="badge-mode">{mode_badge}</span>
-            </div>
-            <div class="user-banner-sub">
-                🚗 Plat: <b>{st.session_state['plat_mobil']}</b> &nbsp;•&nbsp; 🏙️ Wilayah: <b>{st.session_state['kota_kab']}</b>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
 with col_logout:
     st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
     if st.button("🚪 Keluar", use_container_width=True):
