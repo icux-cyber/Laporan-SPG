@@ -484,7 +484,6 @@ def get_warkop_visit_status(kota: str, kecamatan: str, warkop: str, status_map: 
     raw_val = smap.get(key)
     if raw_val in VISIT_STATUS_OPTIONS:
         return raw_val
-    # Fallback pencocokan berdasarkan Kecamatan & Nama Warkop jika Kota kosong/berbeda
     suffix = f"|{str(kecamatan or '').strip().casefold()}|{str(warkop or '').strip().casefold()}"
     for k, v in smap.items():
         if str(k).endswith(suffix) and v in VISIT_STATUS_OPTIONS:
@@ -2091,17 +2090,20 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                         st.markdown(f"#### List Warkop yang Bisa Dikunjungi ({slot_kota} — {slot_kec})")
                         st.caption(
                             f"Tersedia **{len(all_wrk_names)}** warkop pada sektor **{slot_kec}**. "
-                            "Pilih warkop yang **Wajib Kunjung**; warkop lain yang tidak dipilih otomatis menjadi **Opsional**."
+                            "Centang satu per satu warkop yang **Wajib Kunjung**; yang tidak dicentang otomatis menjadi **Opsional**."
                         )
-                        selected_wajib = st.multiselect(
-                            "🔒 Pilih Warkop yang WAJIB KUNJUNG",
-                            options=all_wrk_names,
-                            default=default_wajib_names,
-                            key=f"ms_wajib_{slot_kota}_{slot_kec}_{slot_tgl_str}",
-                        )
-                        opsional_preview = [w for w in all_wrk_names if w not in selected_wajib]
+                        checked_wajib = []
+                        for idx, w in enumerate(all_wrk_names):
+                            is_checked = st.checkbox(
+                                w,
+                                value=(w in default_wajib_names),
+                                key=f"chk_wajib_{slot_kota}_{slot_kec}_{slot_tgl_str}_{idx}_{w}",
+                            )
+                            if is_checked:
+                                checked_wajib.append(w)
+                        opsional_preview = [w for w in all_wrk_names if w not in checked_wajib]
                         st.caption(
-                            f"Ringkasan: **{len(selected_wajib)} Wajib Kunjung** • "
+                            f"Ringkasan: **{len(checked_wajib)} Wajib Kunjung** • "
                             f"**{len(opsional_preview)} Opsional** "
                             f"({', '.join(opsional_preview) if opsional_preview else '-'})"
                         )
@@ -2111,7 +2113,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                         )
 
                         if btn_save_batch:
-                            wajib_set = {str(x).strip().casefold() for x in selected_wajib}
+                            wajib_set = {str(x).strip().casefold() for x in checked_wajib}
                             for _, r in sub_wrk_df.iterrows():
                                 k_str = _warkop_status_key(r["Kota"], r["Kecamatan"], r["Nama Warkop / LKK"])
                                 if str(r["Nama Warkop / LKK"]).strip().casefold() in wajib_set:
@@ -2121,7 +2123,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                             if save_warkop_visit_status_map(status_map_current):
                                 st.success(
                                     f"✅ Status warkop untuk **{slot_team}** ({slot_kota} — {slot_kec}, {slot_tgl_str}) "
-                                    f"disimpan: **{len(selected_wajib)} Wajib Kunjung** & **{len(opsional_preview)} Opsional**."
+                                    f"disimpan: **{len(checked_wajib)} Wajib Kunjung** & **{len(opsional_preview)} Opsional**."
                                 )
                                 st.rerun()
             else:
@@ -2424,7 +2426,6 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             if pilih_tgl != "Semua Tanggal":
                 df_filtered_map = df_filtered_map[df_filtered_map["Tanggal"].astype(str) == pilih_tgl]
 
-            # Kumpulkan seluruh kota unik yang muncul pada titik terfilter; fallback ke Surabaya & Gresik jika kosong
             relevant_kotas = []
             if not df_filtered_map.empty and "Kota_Kab" in df_filtered_map.columns:
                 seen_kota = set()
@@ -2604,7 +2605,6 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                         unsafe_allow_html=True,
                     )
 
-                # Tombol cepat buka Google Maps untuk titik terpilih
                 st.markdown("#### 🔗 Buka Titik di Google Maps")
                 option_map = {
                     f"#{row['Urutan']} | {row['Tanggal']} {row['Jam_Label']} | {row['Warkop_LKK']} ({row['Koordinat_Str']})": row["Link_Google_Maps"]
@@ -3031,7 +3031,6 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             .reset_index()
         )
 
-    # Titik LKK tampil pada rekap setelah Supervisi menginput jumlah kontak di titik tersebut
     if not df_rekap_sup_admin.empty:
         if df_rekap_spg_admin.empty:
             df_combine_admin = df_rekap_sup_admin.copy()
@@ -3573,7 +3572,6 @@ with st.container(border=True):
             if not match_row.empty:
                 alamat_warkop_terpilih = str(match_row.iloc[0][col_alamat_excel])
 
-        # SAVE #1: Save untuk me-lock Titik LKK
         if st.button("🔒 Save Titik LKK (Buka Akses Input SPG)", type="primary", use_container_width=True, key="btn_save_lock_lkk"):
             saved_lock = save_locked_lkk_point(
                 team_name=st.session_state["user_spg"],
@@ -3592,7 +3590,6 @@ with st.container(border=True):
                 )
                 st.rerun()
     else:
-        # Mode SPG: TIDAK boleh menginput sebelum Supervisi memilih & me-save titik lokasi LKK-nya
         col_spg_s1, col_spg_s2 = st.columns([0.78, 0.22])
         with col_spg_s1:
             if locked_point_today:
@@ -3641,7 +3638,6 @@ if st.session_state["login_mode"] == "Supervisi":
     st.markdown(f"### 👀 Dashboard Monitoring & Entry Supervisi: {st.session_state['user_spg']} (Plat Mobil: `{st.session_state['plat_mobil']}`)")
     st.caption("Alur 2 Save: (1) Save Titik LKK untuk membuka input SPG, lalu setelah SPG selesai jualan (2) Save Jumlah Kontak Konsumen Tim.")
 
-    # SAVE #2: Save untuk menyimpan jumlah kontak konsumen setelah SPG selesai jualan
     sup_nonce = st.session_state.get("sup_kontak_nonce", 0)
     with st.form(f"form_entry_kontak_supervisi_{sup_nonce}"):
         st.markdown("#### 📝 Save Jumlah Kontak Konsumen Tim (Setelah SPG Selesai Jualan)")
@@ -3977,7 +3973,6 @@ elif is_inside_geofence and str(nama_spg_manual).strip() != "":
                 df_all = pd.concat([df_all, df_new_row], ignore_index=True)
                 save_database(df_all)
 
-                # Reset seluruh isian form konsumen kembali ke nilai default sementara Nama SPG tetap dipertahankan
                 st.session_state["draft_brand"] = ""
                 st.session_state["draft_gender"] = "L"
                 st.session_state["draft_range_umur"] = "18-24"
@@ -4023,7 +4018,6 @@ if not df_user_rekap.empty:
     else:
         df_user_rekap_filtered = df_user_rekap.copy()
 
-    # Hitung Kontak_Supervisi_Team per Tanggal (bersifat tim, tidak dipecah per SPG/brand)
     team_contact_by_date = {}
     if not df_sup_all_eval.empty and "Promotor" in df_sup_all_eval.columns:
         df_sup_team_eval = df_sup_all_eval[
