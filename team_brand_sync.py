@@ -6,6 +6,7 @@ TEAM_NAMES_FILE = "master_nama_team.json"
 TEAM_BRANDS_FILE = "master_team_brand.json"
 BRANDS_FILE = "master_brand_rokok.json"
 VEHICLES_FILE = "master_plat_kendaraan.json"
+MASTER_SPG_FILE = "master_spg.json"
 
 DEFAULT_TEAM_BRANDS_FALLBACK = [
     "D.Super 12",
@@ -180,15 +181,18 @@ def resolve_team_allowed_brands(
 def sync_masters_from_schedule_upload(
     uploaded_team_names: list[str],
     uploaded_vehicles: dict[str, str] | None = None,
+    uploaded_spgs: list[str] | None = None,
     team_names_file: str = TEAM_NAMES_FILE,
     team_brands_file: str = TEAM_BRANDS_FILE,
     vehicles_file: str = VEHICLES_FILE,
     brands_file: str = BRANDS_FILE,
+    spg_file: str = MASTER_SPG_FILE,
 ) -> tuple[bool, dict]:
     """
     Sinkronisasi otomatis saat admin mengunggah file Excel jadwal:
     - Mengisi master_nama_team.json berdasarkan urutan nama team aktif di Excel.
     - Menggabungkan plat kendaraan baru dari Excel ke master_plat_kendaraan.json.
+    - Menggabungkan nama SPG 1 & SPG 2 baru dari Excel ke master_spg.json.
     - Menyelaraskan master_team_brand.json berdasarkan kata kunci nama team.
     """
     clean_teams = []
@@ -238,6 +242,29 @@ def sync_masters_from_schedule_upload(
         if added_vehicles:
             _write_json_atomic(vehicles_file, merged_vehicles)
 
+    # Sinkronisasi nama SPG 1 & SPG 2 dari jadwal Excel ke master_spg.json
+    added_spgs = []
+    if uploaded_spgs:
+        existing_spg_raw = _read_json_safe(spg_file, [])
+        existing_spgs = existing_spg_raw if isinstance(existing_spg_raw, list) else []
+        merged_spgs = []
+        seen_spgs = set()
+        for item in existing_spgs:
+            spg_name = str(item or "").strip()
+            if spg_name and spg_name.casefold() not in seen_spgs:
+                seen_spgs.add(spg_name.casefold())
+                merged_spgs.append(spg_name)
+
+        for raw_spg in uploaded_spgs:
+            spg_name = str(raw_spg or "").strip()
+            if spg_name and spg_name.casefold() not in {"-", "nan", "none"} and spg_name.casefold() not in seen_spgs:
+                seen_spgs.add(spg_name.casefold())
+                merged_spgs.append(spg_name)
+                added_spgs.append(spg_name)
+
+        if added_spgs:
+            _write_json_atomic(spg_file, sorted(merged_spgs, key=str.casefold))
+
     # Sinkronisasi alokasi brand per team sesuai kata kunci nama team dari Excel
     all_brands = load_active_brands(brands_file)
     synced_team_brands = {
@@ -250,5 +277,6 @@ def sync_masters_from_schedule_upload(
     return True, {
         "teams": clean_teams,
         "added_vehicles": added_vehicles,
+        "added_spgs": added_spgs,
         "team_brands": synced_team_brands,
     }
