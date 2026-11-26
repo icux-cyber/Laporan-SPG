@@ -10,6 +10,7 @@ import pydeck as pdk
 import requests
 from shapely.geometry import Point
 import streamlit as st
+from functools import lru_cache
 from streamlit_js_eval import get_geolocation
 
 try:
@@ -509,30 +510,29 @@ def get_warkop_visit_status(kota: str, kecamatan: str, warkop: str, status_map: 
 
 def build_warkop_status_dataframe(df_lokasi: pd.DataFrame, status_map: dict | None = None) -> pd.DataFrame:
     smap = status_map if isinstance(status_map, dict) else load_warkop_visit_status_map()
+    empty_cols = ["Kota", "Kecamatan", "Nama Warkop / LKK", "Alamat Warkop / LKK", "Status Kunjungan"]
     if df_lokasi is None or df_lokasi.empty:
-        return pd.DataFrame(columns=["Kota", "Kecamatan", "Nama Warkop / LKK", "Alamat Warkop / LKK", "Status Kunjungan"])
+        return pd.DataFrame(columns=empty_cols)
 
     c_kota = next((c for c in df_lokasi.columns if "kota" in str(c).lower()), None)
     c_kec = next((c for c in df_lokasi.columns if "kec" in str(c).lower() or "wilayah" in str(c).lower()), None)
     c_wrk = next((c for c in df_lokasi.columns if "warkop" in str(c).lower() or "lkk" in str(c).lower() or "nama" in str(c).lower()), None)
     c_alm = next((c for c in df_lokasi.columns if "alamat" in str(c).lower() or "address" in str(c).lower()), None)
 
-    rows = []
-    for _, r in df_lokasi.iterrows():
-        kota_v = str(r.get(c_kota, "Surabaya") if c_kota else "Surabaya").strip() or "Surabaya"
-        kec_v = str(r.get(c_kec, "") if c_kec else "").strip()
-        wrk_v = str(r.get(c_wrk, "") if c_wrk else "").strip()
-        alm_v = str(r.get(c_alm, "-") if c_alm else "-").strip() or "-"
-        if not wrk_v:
-            continue
-        rows.append({
-            "Kota": kota_v,
-            "Kecamatan": kec_v,
-            "Nama Warkop / LKK": wrk_v,
-            "Alamat Warkop / LKK": alm_v,
-            "Status Kunjungan": get_warkop_visit_status(kota_v, kec_v, wrk_v, smap),
-        })
-    return pd.DataFrame(rows, columns=["Kota", "Kecamatan", "Nama Warkop / LKK", "Alamat Warkop / LKK", "Status Kunjungan"])
+    out = pd.DataFrame({
+        "Kota": df_lokasi[c_kota].astype(str).str.strip().replace("", "Surabaya") if c_kota else "Surabaya",
+        "Kecamatan": df_lokasi[c_kec].astype(str).str.strip() if c_kec else "",
+        "Nama Warkop / LKK": df_lokasi[c_wrk].astype(str).str.strip() if c_wrk else "",
+        "Alamat Warkop / LKK": (df_lokasi[c_alm].astype(str).str.strip().replace("", "-") if c_alm else "-"),
+    })
+    out = out[out["Nama Warkop / LKK"] != ""].reset_index(drop=True)
+
+    out["Status Kunjungan"] = [
+        get_warkop_visit_status(k, kc, w, smap)
+        for k, kc, w in zip(out["Kota"], out["Kecamatan"], out["Nama Warkop / LKK"])
+    ]
+    return out[empty_cols]
+
 
 
 def load_locked_lkk_points() -> dict:
@@ -882,28 +882,25 @@ def render_google_sheet_backup_controls():
             )
 
         if btn_backup_gs:
-            try:
-                with st.spinner("Mem-backup data ke Google Sheet..."):
-                    df_rekap = pd.read_csv(DB_FILE) if os.path.exists(DB_FILE) else pd.DataFrame(columns=EXPECTED_COLUMNS)
-                    df_sup = pd.read_csv(DB_SUPERVISI_KONTAK_FILE) if os.path.exists(DB_SUPERVISI_KONTAK_FILE) else pd.DataFrame(columns=EXPECTED_SUPERVISI_COLUMNS)
-                    df_jdw = pd.read_excel(JADWAL_SPG_FILE) if os.path.exists(JADWAL_SPG_FILE) else pd.DataFrame()
-                    df_wrk = pd.read_excel(MASTER_LOKASI_FILE) if os.path.exists(MASTER_LOKASI_FILE) else pd.DataFrame()
+    	    try:
+        	with st.spinner("Mem-backup data ke Google Sheet..."):
+            	    snapshot = load_supabase_backup_data()
+            	    ds = snapshot["datasets"]
+            	    payload = {
+                	"action": "backup",
+                	"rekap_laporan": ds["rekap_laporan"],
+                	"rekap_supervisi": ds["rekap_supervisi"],
+                	"jadwal_spg": ds["jadwal_spg"],
+                	"master_warkop": ds["master_warkop"],
+            	    }
+            	    res_json = post_google_sheet(payload)
+            	    if res_json.get("status") == "success":
+                	st.success("✅ " + res_json.get("message", "Backup berhasil!"))
+           	    else:
+                	st.error("❌ " + res_json.get("message", "Gagal backup."))
+    	    except Exception as e:
+        	st.error(f"Error backup: {e}")
 
-                    payload = {
-                        "action": "backup",
-                        "rekap_laporan": df_to_sheet_rows(df_rekap),
-                        "rekap_supervisi": df_to_sheet_rows(df_sup),
-                        "jadwal_spg": df_to_sheet_rows(df_jdw),
-                        "master_warkop": df_to_sheet_rows(df_wrk),
-                    }
-
-                    res_json = post_google_sheet(payload)
-                    if res_json.get("status") == "success":
-                        st.success("✅ " + res_json.get("message", "Backup berhasil!"))
-                    else:
-                        st.error("❌ " + res_json.get("message", "Gagal backup."))
-            except Exception as e:
-                st.error(f"Error backup: {e}")
 
         if btn_backup_supabase:
             try:
@@ -1014,19 +1011,34 @@ def _cached_read_json(path: str, mtime: float):
         return json.load(f)
 
 
+@st.cache_data(show_spinner=False)
+def _cached_read_json_no_mtime(path: str) -> dict | list | None:
+    """Cache JSON tanpa parameter mtime — untuk file master yang jarang berubah.
+    Cache di-invalidasi manual via st.cache_data.clear() saat save."""
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 # ====================================================
 # DATABASE TRANSAKSI & SUPERVISI
 # ====================================================
+@st.cache_data(show_spinner=False)
+def _cached_load_db_transformed(path: str, mtime: float) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    if "Usia" in df.columns and "Range_Umur" not in df.columns:
+        df = df.rename(columns={"Usia": "Range_Umur"})
+    for col in EXPECTED_COLUMNS:
+        if col not in df.columns:
+            df[col] = "-"
+    return df[EXPECTED_COLUMNS]
+
+
 def load_database():
     if os.path.exists(DB_FILE):
         try:
-            df = _cached_read_csv(DB_FILE, _file_mtime(DB_FILE)).copy()
-            if "Usia" in df.columns and "Range_Umur" not in df.columns:
-                df = df.rename(columns={"Usia": "Range_Umur"})
-            for col in EXPECTED_COLUMNS:
-                if col not in df.columns:
-                    df[col] = "-"
-            return df[EXPECTED_COLUMNS]
+            return _cached_load_db_transformed(DB_FILE, _file_mtime(DB_FILE)).copy()
         except Exception:
             return pd.DataFrame(columns=EXPECTED_COLUMNS)
     return pd.DataFrame(columns=EXPECTED_COLUMNS)
@@ -1036,14 +1048,22 @@ def save_database(df):
     df.to_csv(DB_FILE, index=False)
 
 
+@st.cache_data(show_spinner=False)
+def _cached_load_sup_transformed(path: str, mtime: float) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    for col in EXPECTED_SUPERVISI_COLUMNS:
+        if col not in df.columns:
+            df[col] = "-"
+    return df[EXPECTED_SUPERVISI_COLUMNS]
+
+
 def load_supervisi_database():
     if os.path.exists(DB_SUPERVISI_KONTAK_FILE):
         try:
-            df = _cached_read_csv(DB_SUPERVISI_KONTAK_FILE, _file_mtime(DB_SUPERVISI_KONTAK_FILE)).copy()
-            for col in EXPECTED_SUPERVISI_COLUMNS:
-                if col not in df.columns:
-                    df[col] = "-"
-            return df[EXPECTED_SUPERVISI_COLUMNS]
+            return _cached_load_sup_transformed(
+                DB_SUPERVISI_KONTAK_FILE,
+                _file_mtime(DB_SUPERVISI_KONTAK_FILE),
+            ).copy()
         except Exception:
             return pd.DataFrame(columns=EXPECTED_SUPERVISI_COLUMNS)
     return pd.DataFrame(columns=EXPECTED_SUPERVISI_COLUMNS)
@@ -1181,8 +1201,23 @@ KECAMATAN_BY_KOTA = {
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def _get_kecamatan_filepath_map() -> dict:
+    """Cache mapping nama kecamatan (casefold) → filepath. Sekali baca index per jam."""
+    result = {}
+    if os.path.exists(GEOJSON_INDEX_FILE):
+        try:
+            idx = _cached_read_json(GEOJSON_INDEX_FILE, _file_mtime(GEOJSON_INDEX_FILE))
+            if isinstance(idx, dict):
+                for k, v in idx.items():
+                    if isinstance(v, dict) and v.get("file"):
+                        result[str(k).strip().casefold()] = v["file"]
+        except Exception:
+            pass
+    return result
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def load_geojson_index(mtime: float = 0.0) -> dict:
-    """Membaca indeks ringan (_index.json) tanpa memuat geometri poligon."""
     if os.path.exists(GEOJSON_INDEX_FILE):
         try:
             raw_idx = _cached_read_json(GEOJSON_INDEX_FILE, _file_mtime(GEOJSON_INDEX_FILE))
@@ -1201,16 +1236,14 @@ def _resolve_kecamatan_filepath(nm_kecamatan: str) -> str | None:
     if not nm_kecamatan:
         return None
     target = str(nm_kecamatan).strip()
-    idx = load_geojson_index(_file_mtime(GEOJSON_INDEX_FILE))
-    entry = idx.get(target.casefold())
-    if entry and entry.get("file"):
-        cand = entry["file"]
+    fmap = _get_kecamatan_filepath_map()
+    cand = fmap.get(target.casefold())
+    if cand:
         if os.path.exists(cand):
             return cand
         base_cand = os.path.join("geojson_by_kecamatan", os.path.basename(cand))
         if os.path.exists(base_cand):
             return base_cand
-
     slug = re.sub(r"[^a-z0-9]+", "_", target.lower()).strip("_")
     fallback_path = os.path.join("geojson_by_kecamatan", f"{slug}.geojson")
     if os.path.exists(fallback_path):
@@ -1219,22 +1252,22 @@ def _resolve_kecamatan_filepath(nm_kecamatan: str) -> str | None:
 
 
 @st.cache_data(ttl=3600, max_entries=40, show_spinner=False)
-def load_kecamatan_geojson(nm_kecamatan: str, mtime: float = 0.0) -> dict | None:
-    """Memuat file GeoJSON 1 kecamatan secara on-demand (2D, presisi 6 desimal)."""
+def load_kecamatan_geojson(nm_kecamatan: str) -> dict | None:
+    """Memuat file GeoJSON 1 kecamatan. Cache by nama — tidak lagi by mtime."""
     filepath = _resolve_kecamatan_filepath(nm_kecamatan)
     if not filepath:
         return None
     try:
-        return _cached_read_json(filepath, _file_mtime(filepath))
+        with open(filepath, "r", encoding="utf-8") as f:
+            return json.load(f)
     except Exception as e:
         st.error(f"Gagal memuat GeoJSON kecamatan '{nm_kecamatan}': {e}")
         return None
 
 
 @st.cache_data(ttl=3600, max_entries=40, show_spinner=False)
-def load_kecamatan_gdf(nm_kecamatan: str, mtime: float = 0.0):
-    """Mengonversi 1 file GeoJSON kecamatan ke GeoDataFrame hanya saat dibutuhkan."""
-    data = load_kecamatan_geojson(nm_kecamatan, mtime)
+def load_kecamatan_gdf(nm_kecamatan: str):
+    data = load_kecamatan_geojson(nm_kecamatan)
     if not data:
         return None
     try:
@@ -1247,9 +1280,33 @@ def load_kecamatan_gdf(nm_kecamatan: str, mtime: float = 0.0):
         return None
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def build_polygon_features(kecamatan_tuple: tuple) -> list:
+    """Build features gabungan untuk PyDeck — cache by tuple kecamatan terpilih."""
+    gresik_set = {k.casefold() for k in KECAMATAN_BY_KOTA["Gresik"]}
+    features = []
+    for kec_name in kecamatan_tuple:
+        gj = load_kecamatan_geojson(kec_name)
+        if not gj or not isinstance(gj.get("features"), list):
+            continue
+        is_gresik = kec_name.strip().casefold() in gresik_set
+        fill_col = [16, 185, 129, 35] if is_gresik else [30, 144, 255, 35]
+        line_col = [5, 150, 105, 210] if is_gresik else [37, 99, 235, 210]
+        kota_label = "Gresik" if is_gresik else "Surabaya"
+        for feat in gj["features"]:
+            props = dict(feat.get("properties") or {})
+            props.setdefault("Kota_Wilayah", kota_label)
+            props["fill_color"] = fill_col
+            props["line_color"] = line_col
+            features.append({
+                "type": "Feature",
+                "properties": props,
+                "geometry": feat.get("geometry"),
+            })
+    return features
+
+
 def load_master_wilayah(kota, kecamatan_list=None):
-    """Kompatibilitas mundur: memuat GeoDataFrame per kecamatan terpilih saja jika diberikan,
-    atau seluruh kecamatan kota dari folder geojson_by_kecamatan/ jika kecamatan_list=None."""
     k_norm = str(kota or "").strip().casefold()
     if k_norm == "surabaya":
         all_kec = KECAMATAN_BY_KOTA["Surabaya"]
@@ -1265,14 +1322,12 @@ def load_master_wilayah(kota, kecamatan_list=None):
     )
     gdfs = []
     for kec in target_kec:
-        fp = _resolve_kecamatan_filepath(kec)
-        gdf_k = load_kecamatan_gdf(kec, _file_mtime(fp) if fp else 0.0)
+        gdf_k = load_kecamatan_gdf(kec)
         if gdf_k is not None and not gdf_k.empty:
             gdf_copy = gdf_k.copy()
             if "nm_kecamatan" not in gdf_copy.columns:
                 gdf_copy["nm_kecamatan"] = kec
             gdfs.append(gdf_copy)
-
     if not gdfs:
         return None
     combined = pd.concat(gdfs, ignore_index=True)
@@ -1359,26 +1414,36 @@ DEFAULT_SPGS = ["Nanda"]
 DEFAULT_PLATS = ["L 1234 ABC"]
 
 
+# ====================================================
+# MASTER BRAND / TARGET / TEAM / PLAT / NAMA TEAM (CACHED)
+# ====================================================
+DEFAULT_BRANDS = [
+    "D.Super 12",
+    "D.Super Kretek",
+    "D.76 Apel",
+    "D.76 Apel Royal",
+    "Black Matcha K12",
+    "Djarum 76 Aksara",
+    "Black Matcha Siro",
+    "Black Matcha Kuro",
+]
+DEFAULT_SPGS = ["Nanda"]
+DEFAULT_PLATS = ["L 1234 ABC"]
+
+
 def load_master_team_names():
     default_teams = {f"Team SPG {i}": f"Team SPG {i}" for i in range(1, 21)}
-    if os.path.exists(MASTER_TEAM_NAME_FILE):
-        try:
-            with open(MASTER_TEAM_NAME_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if not isinstance(data, dict):
-                    return default_teams
-                for i in range(1, 21):
-                    key = f"Team SPG {i}"
-                    if key not in data:
-                        data[key] = key
-                    else:
-                        data[key] = str(data[key]).strip()
-                return data
-        except Exception:
-            return default_teams
-    else:
+    data = _cached_read_json_no_mtime(MASTER_TEAM_NAME_FILE)
+    if not isinstance(data, dict):
         save_master_team_names(default_teams)
         return default_teams
+    for i in range(1, 21):
+        key = f"Team SPG {i}"
+        if key not in data:
+            data[key] = key
+        else:
+            data[key] = str(data[key]).strip()
+    return data
 
 
 def save_master_team_names(team_names_dict):
@@ -1400,6 +1465,7 @@ def save_master_team_names(team_names_dict):
                 ensure_ascii=False,
                 indent=2,
             )
+        st.cache_data.clear()
         return True
     except Exception as e:
         st.error(f"Gagal menyimpan master nama team: {e}")
@@ -1407,19 +1473,15 @@ def save_master_team_names(team_names_dict):
 
 
 def load_master_brands():
-    if os.path.exists(MASTER_BRAND_FILE):
-        try:
-            with open(MASTER_BRAND_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return DEFAULT_BRANDS
-    return DEFAULT_BRANDS
+    data = _cached_read_json_no_mtime(MASTER_BRAND_FILE)
+    return data if isinstance(data, list) else DEFAULT_BRANDS
 
 
 def save_master_brands(brands):
     try:
         with open(MASTER_BRAND_FILE, "w", encoding="utf-8") as f:
             json.dump(brands, f, ensure_ascii=False, indent=2)
+        st.cache_data.clear()
         return True
     except Exception as e:
         st.error(f"Gagal menyimpan file master_brand_rokok.json: {e}")
@@ -1434,22 +1496,15 @@ def load_master_team_brands():
         team_name: match_brands_by_team_name(team_name, current_brands)
         for team_name in active_team_names
     }
-    if os.path.exists(MASTER_TEAM_BRAND_FILE):
-        try:
-            with open(MASTER_TEAM_BRAND_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if not isinstance(data, dict):
-                    data = {}
-                for i, t_name in enumerate(active_team_names, start=1):
-                    t_key = f"Team SPG {i}"
-                    if t_name not in data and t_key not in data:
-                        data[t_name] = match_brands_by_team_name(t_name, current_brands)
-                return data
-        except Exception:
-            return default_teams
-    else:
+    data = _cached_read_json_no_mtime(MASTER_TEAM_BRAND_FILE)
+    if not isinstance(data, dict):
         save_master_team_brands(default_teams)
         return default_teams
+    for i, t_name in enumerate(active_team_names, start=1):
+        t_key = f"Team SPG {i}"
+        if t_name not in data and t_key not in data:
+            data[t_name] = match_brands_by_team_name(t_name, current_brands)
+    return data
 
 
 def save_master_team_brands(team_brands):
@@ -1460,6 +1515,7 @@ def save_master_team_brands(team_brands):
         }
         with open(MASTER_TEAM_BRAND_FILE, "w", encoding="utf-8") as f:
             json.dump(cleaned_data, f, ensure_ascii=False, indent=2)
+        st.cache_data.clear()
         return True
     except Exception as e:
         st.error(f"❌ Gagal menyimpan ke `{MASTER_TEAM_BRAND_FILE}`: {e}")
@@ -1467,23 +1523,29 @@ def save_master_team_brands(team_brands):
 
 
 def load_master_plat_kendaraan():
-    if os.path.exists(MASTER_PLAT_FILE):
-        try:
-            with open(MASTER_PLAT_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, list):
-                    return data
-                elif isinstance(data, dict):
-                    return list(data.values())
-        except Exception:
-            return DEFAULT_PLATS
+    data = _cached_read_json_no_mtime(MASTER_PLAT_FILE)
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        return list(data.values())
     return DEFAULT_PLATS
 
 
 def save_master_plat_kendaraan(plat_list):
     with open(MASTER_PLAT_FILE, "w", encoding="utf-8") as f:
         json.dump(plat_list, f, ensure_ascii=False, indent=2)
+    st.cache_data.clear()
 
+
+def load_master_spgs():
+    data = _cached_read_json_no_mtime(MASTER_SPG_FILE)
+    return data if isinstance(data, list) else DEFAULT_SPGS
+
+
+def save_master_spgs(spgs):
+    with open(MASTER_SPG_FILE, "w", encoding="utf-8") as f:
+        json.dump(spgs, f, ensure_ascii=False, indent=2)
+    st.cache_data.clear()
 
 def load_master_lokasi_excel():
     if os.path.exists(MASTER_LOKASI_FILE):
@@ -1633,16 +1695,9 @@ TARGET_GROUP_OPTIONS = {
     "Black_Matcha": TARGET_GROUP_LABELS["Black_Matcha"],
 }
 
-
 def load_target_rules():
-    if os.path.exists(MASTER_TARGET_FILE):
-        try:
-            with open(MASTER_TARGET_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return data if isinstance(data, dict) else dict(DEFAULT_TARGET_RULES)
-        except Exception:
-            return dict(DEFAULT_TARGET_RULES)
-    return dict(DEFAULT_TARGET_RULES)
+    data = _cached_read_json_no_mtime(MASTER_TARGET_FILE)
+    return data if isinstance(data, dict) else dict(DEFAULT_TARGET_RULES)
 
 
 def refresh_target_rules():
@@ -1656,24 +1711,22 @@ def save_target_rules(rules):
     cleaned = rules if isinstance(rules, dict) else {}
     with open(MASTER_TARGET_FILE, "w", encoding="utf-8") as f:
         json.dump(cleaned, f, ensure_ascii=False, indent=2)
+    st.cache_data.clear()
     TARGET_RULES = load_target_rules()
 
 
 TARGET_RULES = load_target_rules()
-
 
 def normalize_brand_key(brand):
     return "".join(str(brand).casefold().split())
 
 
 def get_brand_target_rule(brand):
-    rules_map = refresh_target_rules()
     brand_key = normalize_brand_key(brand)
     return next(
-        (rule for rule_brand, rule in rules_map.items() if normalize_brand_key(rule_brand) == brand_key),
+        (rule for rule_brand, rule in TARGET_RULES.items() if normalize_brand_key(rule_brand) == brand_key),
         {},
     )
-
 
 def clean_brand_target_name(brand):
     group = get_brand_target_rule(brand).get("group")
@@ -1681,8 +1734,8 @@ def clean_brand_target_name(brand):
 
 
 def get_group_target(group_name, target_key, default_val):
-    rules_map = refresh_target_rules()
-    for brand, rule in rules_map.items():
+    rules_map = TARGET_RULES
+        for brand, rule in rules_map.items():
         rule_group = rule.get("group")
         if rule_group == "Black_Siro_Kuro":
             rule_group = "Black_Matcha"
@@ -2626,11 +2679,12 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
             col_poly_sel, col_poly_reset = st.columns([0.78, 0.22])
             with col_poly_sel:
                 kecamatan_peta_terpilih = st.multiselect(
-                    "Poligon Kecamatan Ditampilkan (On-Demand)",
-                    options=opsi_kec_peta,
-                    key="peta_filter_kecamatan_geojson",
-                    help="Memuat file GeoJSON per kecamatan secara on-demand agar peta cepat dan ringan.",
-                )
+    		    "Poligon Kecamatan Ditampilkan (On-Demand)",
+    		    options=opsi_kec_peta,
+    		    key="peta_filter_kecamatan_geojson",
+    		    max_selections=8,
+    		    help="Maksimal 8 kecamatan untuk performa optimal.",
+		)
             with col_poly_reset:
                 st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                 if st.button("🔄 Reset Poligon", key="btn_reset_peta_polygon", use_container_width=True):
@@ -2639,27 +2693,13 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
 
             if not kecamatan_peta_terpilih:
                 st.caption("ℹ️ Tidak ada kecamatan yang dipilih pada filter poligon—poligon tidak digambar (titik & rute tetap tampil).")
+	    if len(kecamatan_peta_terpilih) > 8:
+    		st.warning("⚠️ Maksimal 8 kecamatan untuk performa optimal. Menampilkan 8 			pertama.")
+		kecamatan_peta_terpilih = kecamatan_peta_terpilih[:8]
 
-            gresik_set = {k.casefold() for k in KECAMATAN_BY_KOTA["Gresik"]}
-            features_gabungan = []
-            for kec_name in kecamatan_peta_terpilih:
-                fp_kec = _resolve_kecamatan_filepath(kec_name)
-                gj_kec = load_kecamatan_geojson(kec_name, _file_mtime(fp_kec) if fp_kec else 0.0)
-                if gj_kec and isinstance(gj_kec.get("features"), list):
-                    is_gresik = kec_name.strip().casefold() in gresik_set
-                    fill_col = [16, 185, 129, 35] if is_gresik else [30, 144, 255, 35]
-                    line_col = [5, 150, 105, 210] if is_gresik else [37, 99, 235, 210]
-                    kota_label = "Gresik" if is_gresik else "Surabaya"
-                    for feat in gj_kec["features"]:
-                        props = dict(feat.get("properties") or {})
-                        props.setdefault("Kota_Wilayah", kota_label)
-                        props["fill_color"] = fill_col
-                        props["line_color"] = line_col
-                        features_gabungan.append({
-                            "type": "Feature",
-                            "properties": props,
-                            "geometry": feat.get("geometry"),
-                        })
+	    features_gabungan = build_polygon_features(tuple(kecamatan_peta_terpilih))
+
+            
 
             if features_gabungan:
                 layers_list.append(
@@ -2691,22 +2731,19 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
                 else:
                     df_filtered_map["Urutan"] = df_filtered_map.index + 1
 
-                df_filtered_map["Jam_Label"] = df_filtered_map["Waktu_Dt"].apply(
-                    lambda dt: dt.strftime("%H:%M") if pd.notna(dt) else "-"
-                )
-                df_filtered_map["Warkop_Label"] = df_filtered_map["Warkop_LKK"].fillna("-").astype(str)
-                df_filtered_map["Indikator_Titik"] = (
-                    "#" + df_filtered_map["Urutan"].astype(str)
-                    + " (" + df_filtered_map["Jam_Label"] + ") - "
-                    + df_filtered_map["Warkop_Label"]
-                )
-                df_filtered_map["Koordinat_Str"] = df_filtered_map.apply(
-                    lambda r: f"{r['Latitude']:.6f}, {r['Longitude']:.6f}", axis=1
-                )
-                df_filtered_map["Link_Google_Maps"] = df_filtered_map.apply(
-                    lambda r: f"https://www.google.com/maps/search/?api=1&query={r['Latitude']:.6f},{r['Longitude']:.6f}",
-                    axis=1,
-                )
+                df_filtered_map["Jam_Label"] = df_filtered_map["Waktu_Dt"].dt.strftime("%H:%M").fillna("-")
+		df_filtered_map["Warkop_Label"] = df_filtered_map["Warkop_LKK"].fillna("-").astype(str)
+		df_filtered_map["Indikator_Titik"] = (
+    		    "#" + df_filtered_map["Urutan"].astype(str)
+    		    + " (" + df_filtered_map["Jam_Label"] + ") - "
+    		    + df_filtered_map["Warkop_Label"]
+		)
+		_lat_str = df_filtered_map["Latitude"].map(lambda x: f"{x:.6f}")
+		_lon_str = df_filtered_map["Longitude"].map(lambda x: f"{x:.6f}")
+		df_filtered_map["Koordinat_Str"] = _lat_str + ", " + _lon_str
+		df_filtered_map["Link_Google_Maps"] = (
+    		    "https://www.google.com/maps/search/?api=1&query=" + _lat_str + "," + _lon_str
+		)
 
                 point_palette_rgba = [
                     [234, 88, 12, 235],
