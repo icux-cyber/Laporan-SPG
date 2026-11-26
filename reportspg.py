@@ -882,26 +882,24 @@ def render_google_sheet_backup_controls():
             )
 
         if btn_backup_gs:
-    	    try:
-				with st.spinner("Mem-backup data ke Google Sheet..."):
-            	    snapshot = load_supabase_backup_data()
-            	    ds = snapshot["datasets"]
-            	    payload = {
-                	"action": "backup",
-                	"rekap_laporan": ds["rekap_laporan"],
-                	"rekap_supervisi": ds["rekap_supervisi"],
-                	"jadwal_spg": ds["jadwal_spg"],
-                	"master_warkop": ds["master_warkop"],
-            	    }
-            	    res_json = post_google_sheet(payload)
-            	    if res_json.get("status") == "success":
-                	st.success("✅ " + res_json.get("message", "Backup berhasil!"))
-           	    else:
-                	st.error("❌ " + res_json.get("message", "Gagal backup."))
-    	    except Exception as e:
-        	st.error(f"Error backup: {e}")
-
-
+            try:
+                with st.spinner("Mem-backup data ke Google Sheet..."):
+                    snapshot = load_supabase_backup_data()
+                    ds = snapshot["datasets"]
+                    payload = {
+                        "action": "backup",
+                        "rekap_laporan": ds["rekap_laporan"],
+                        "rekap_supervisi": ds["rekap_supervisi"],
+                        "jadwal_spg": ds["jadwal_spg"],
+                        "master_warkop": ds["master_warkop"],
+                    }
+                    res_json = post_google_sheet(payload)
+                    if res_json.get("status") == "success":
+                        st.success("✅ " + res_json.get("message", "Backup berhasil!"))
+                    else:
+                        st.error("❌ " + res_json.get("message", "Gagal backup."))
+            except Exception as e:
+                st.error(f"Error backup: {e}")
         if btn_backup_supabase:
             try:
                 with st.spinner("Mem-backup data ke Supabase..."):
