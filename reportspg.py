@@ -2584,6 +2584,12 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             if not default_kec_peta and opsi_kec_peta:
                 default_kec_peta = opsi_kec_peta[:3]
 
+            if "peta_filter_kecamatan_geojson_pending" in st.session_state:
+                st.session_state["peta_filter_kecamatan_geojson"] = [
+                    x for x in st.session_state.pop("peta_filter_kecamatan_geojson_pending")
+                    if x in opsi_kec_peta
+                ]
+
             if "peta_filter_kecamatan_geojson" not in st.session_state:
                 st.session_state["peta_filter_kecamatan_geojson"] = default_kec_peta
             else:
@@ -2603,7 +2609,7 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             with col_poly_reset:
                 st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                 if st.button("🔄 Reset Poligon", key="btn_reset_peta_polygon", use_container_width=True):
-                    st.session_state["peta_filter_kecamatan_geojson"] = default_kec_peta
+                    st.session_state["peta_filter_kecamatan_geojson_pending"] = list(default_kec_peta)
                     st.rerun()
 
             if not kecamatan_peta_terpilih:
