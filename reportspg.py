@@ -1158,6 +1158,58 @@ def get_geo_districts(kota: str) -> list[str]:
     return []
 
 
+def get_scheduled_slots_for_date(target_date: date | None = None) -> list[dict]:
+    """Mengambil seluruh jadwal penugasan (Tanggal, Team, Kota, Kecamatan) dari Jadwal SPG.xlsx."""
+    df_j = load_jadwal_spg()
+    if df_j is None or df_j.empty:
+        return []
+
+    kota_col = next((c for c in df_j.columns if "kota" in str(c).lower()), None)
+    kec_col = next((c for c in df_j.columns if "kecamatan" in str(c).lower()), None)
+    if not kota_col or not kec_col:
+        return []
+
+    ref_date = target_date or (datetime.utcnow() + timedelta(hours=7)).date()
+    date_cols = []
+    for c in df_j.columns:
+        if c in {kota_col, kec_col}:
+            continue
+        try:
+            parsed_dt = pd.to_datetime(c).date()
+            date_cols.append((c, parsed_dt))
+        except Exception:
+            continue
+
+    if target_date is not None:
+        date_cols = [(c, dt) for c, dt in date_cols if dt == ref_date]
+
+    slots = []
+    seen = set()
+    for _, row in df_j.iterrows():
+        kota_val = normalize_text(row.get(kota_col, "")) or "Surabaya"
+        kec_val = normalize_text(row.get(kec_col, ""))
+        if not kec_val:
+            continue
+        for c_name, dt_val in date_cols:
+            team_val = normalize_text(row.get(c_name, ""))
+            if not team_val or team_val.lower() in {"nan", "none", "-"}:
+                continue
+            key = (dt_val.isoformat(), team_val.casefold(), kota_val.casefold(), kec_val.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            slots.append({
+                "tanggal": dt_val,
+                "tanggal_str": dt_val.strftime("%d %b %Y"),
+                "team": team_val,
+                "kota": kota_val,
+                "kecamatan": kec_val,
+            })
+
+    slots.sort(key=lambda item: (item["tanggal"], item["team"].casefold(), item["kota"].casefold(), item["kecamatan"].casefold()))
+    return slots
+
+
 # ====================================================
 # MASTER BRAND / TARGET / TEAM / PLAT / NAMA TEAM
 # ====================================================
@@ -1944,10 +1996,10 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             st.rerun()
         st.stop()
 
-    # --- MASTER LOKASI WARKOP (TAMPILAN SELARSAS MENU JADWAL SPG) ---
+    # --- MASTER LOKASI WARKOP (SELARAS DENGAN JADWAL SPG) ---
     elif st.session_state["admin_view"] == "Master_Lokasi":
         st.markdown("## 📍 Entry & Pengaturan Warkop Wajib / Tidak Wajib Kunjung")
-        st.caption("Kelola daftar warkop/LKK dengan memilih titik **Wajib Kunjung**; sisa titik otomatis menjadi **Opsional** tanpa batas jumlah.")
+        st.caption("Selaras dengan **Jadwal SPG**: pilih tanggal & jadwal aktif (Team — Kota / Sektor Kecamatan) untuk melihat daftar warkop yang bisa dikunjungi lalu tentukan mana yang **Wajib Kunjung** dan **Opsional**.")
 
         df_lokasi_excel = load_master_lokasi_excel()
         status_map_current = load_warkop_visit_status_map()
@@ -1963,14 +2015,117 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
         with c_stat3:
             st.metric("🔓 Opsional", jml_tidak_wajib)
 
-        tab_wrk_add, tab_wrk_batch, tab_wrk_manage, tab_wrk_excel = st.tabs(
+        tab_wrk_jadwal, tab_wrk_add, tab_wrk_manage, tab_wrk_excel = st.tabs(
             [
+                "🗓️ Pengaturan per Jadwal SPG",
                 "➕ Tambah Warkop Baru",
-                "🔒 Atur Massal Wajib / Opsional",
                 "✏️ Kelola Warkop Aktif",
                 "📥 Download / Upload Excel",
             ]
         )
+
+        with tab_wrk_jadwal:
+            st.markdown("#### Pilih Tanggal & Jadwal SPG Aktif")
+            st.caption("Menampilkan jadwal SPG pada tanggal terpilih beserta daftar warkop pada wilayah/sektor kecamatan jadwal tersebut.")
+
+            default_sched_date = (datetime.utcnow() + timedelta(hours=7)).date()
+            selected_sched_date = st.date_input(
+                "Tanggal Jadwal SPG",
+                value=default_sched_date,
+                key="wrk_sched_date",
+            )
+
+            sched_slots_today = get_scheduled_slots_for_date(selected_sched_date)
+            all_sched_slots = get_scheduled_slots_for_date(None)
+
+            if not sched_slots_today:
+                st.warning(
+                    f"Tidak ada jadwal SPG aktif pada tanggal **{selected_sched_date.strftime('%d %b %Y')}**. "
+                    "Anda dapat memilih jadwal dari tanggal lain di bawah atau menambahkan jadwal pada menu **Entry & Jadwal SPG**."
+                )
+                active_slot_pool = all_sched_slots
+            else:
+                active_slot_pool = sched_slots_today
+
+            if active_slot_pool:
+                slot_labels = [
+                    f"{s['tanggal_str']} — {s['team']} | Wilayah / Sektor: {s['kota']} — {s['kecamatan']}"
+                    for s in active_slot_pool
+                ]
+                selected_slot_idx = st.selectbox(
+                    "Jadwal SPG Aktif",
+                    options=range(len(slot_labels)),
+                    format_func=lambda i: slot_labels[i],
+                    key="wrk_sched_slot_select",
+                )
+                chosen_slot = active_slot_pool[selected_slot_idx]
+                slot_kota = chosen_slot["kota"]
+                slot_kec = chosen_slot["kecamatan"]
+                slot_team = chosen_slot["team"]
+                slot_tgl_str = chosen_slot["tanggal_str"]
+
+                st.info(
+                    f"📅 **Jadwal Terpilih:** **{slot_tgl_str}** • Team: **{slot_team}** • "
+                    f"Wilayah / Sektor: **{slot_kota} — {slot_kec}**"
+                )
+
+                sub_wrk_df = df_warkop_view[
+                    (df_warkop_view["Kota"].astype(str).str.strip().str.casefold() == slot_kota.strip().casefold())
+                    & (df_warkop_view["Kecamatan"].astype(str).str.strip().str.casefold() == slot_kec.strip().casefold())
+                ].copy()
+
+                all_wrk_names = sub_wrk_df["Nama Warkop / LKK"].tolist() if not sub_wrk_df.empty else []
+                default_wajib_names = [
+                    r["Nama Warkop / LKK"]
+                    for _, r in sub_wrk_df.iterrows()
+                    if r["Status Kunjungan"] == VISIT_STATUS_WAJIB
+                ] if not sub_wrk_df.empty else []
+
+                if not all_wrk_names:
+                    st.warning(
+                        f"Belum ada daftar warkop terdaftar untuk wilayah/sektor **{slot_kota} — {slot_kec}**. "
+                        "Tambahkan warkop baru pada tab **Tambah Warkop Baru**."
+                    )
+                else:
+                    with st.form("form_batch_status_warkop"):
+                        st.markdown(f"#### List Warkop yang Bisa Dikunjungi ({slot_kota} — {slot_kec})")
+                        st.caption(
+                            f"Tersedia **{len(all_wrk_names)}** warkop pada sektor **{slot_kec}**. "
+                            "Pilih warkop yang **Wajib Kunjung**; warkop lain yang tidak dipilih otomatis menjadi **Opsional**."
+                        )
+                        selected_wajib = st.multiselect(
+                            "🔒 Pilih Warkop yang WAJIB KUNJUNG",
+                            options=all_wrk_names,
+                            default=default_wajib_names,
+                            key=f"ms_wajib_{slot_kota}_{slot_kec}_{slot_tgl_str}",
+                        )
+                        opsional_preview = [w for w in all_wrk_names if w not in selected_wajib]
+                        st.caption(
+                            f"Ringkasan: **{len(selected_wajib)} Wajib Kunjung** • "
+                            f"**{len(opsional_preview)} Opsional** "
+                            f"({', '.join(opsional_preview) if opsional_preview else '-'})"
+                        )
+                        btn_save_batch = st.form_submit_button(
+                            "💾 Simpan Status Wajib / Opsional Jadwal Ini",
+                            type="primary",
+                        )
+
+                        if btn_save_batch:
+                            wajib_set = {str(x).strip().casefold() for x in selected_wajib}
+                            for _, r in sub_wrk_df.iterrows():
+                                k_str = _warkop_status_key(r["Kota"], r["Kecamatan"], r["Nama Warkop / LKK"])
+                                if str(r["Nama Warkop / LKK"]).strip().casefold() in wajib_set:
+                                    status_map_current[k_str] = VISIT_STATUS_WAJIB
+                                else:
+                                    status_map_current[k_str] = VISIT_STATUS_TIDAK_WAJIB
+                            if save_warkop_visit_status_map(status_map_current):
+                                st.success(
+                                    f"✅ Status warkop untuk **{slot_team}** ({slot_kota} — {slot_kec}, {slot_tgl_str}) "
+                                    f"disimpan: **{len(selected_wajib)} Wajib Kunjung** & **{len(opsional_preview)} Opsional**."
+                                )
+                                st.rerun()
+            else:
+                st.info("Belum ada data jadwal pada `Jadwal SPG.xlsx`.")
 
         with tab_wrk_add:
             st.markdown("#### Tambah titik warkop / LKK baru")
@@ -2030,62 +2185,6 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                     else:
                         st.warning("Mohon isi nama Kecamatan dan Nama Warkop/LKK.")
 
-        with tab_wrk_batch:
-            st.markdown("#### Atur daftar Warkop Wajib Kunjung per Kecamatan (sisanya otomatis Opsional)")
-            st.caption("Pilih Kota & Kecamatan, lalu pilih warkop mana saja yang **Wajib Kunjung** (bebas jumlahnya). Titik yang tidak dipilih otomatis berstatus **Opsional**.")
-            if df_warkop_view.empty:
-                st.info("Belum ada data warkop pada Master WarkopLKK.xlsx.")
-            else:
-                col_b1, col_b2 = st.columns(2)
-                with col_b1:
-                    batch_kota = st.selectbox("Kota / Kabupaten", options=sorted(df_warkop_view["Kota"].unique().tolist()), key="batch_wrk_kota")
-                kec_in_city = sorted(
-                    df_warkop_view[df_warkop_view["Kota"].str.casefold() == batch_kota.casefold()]["Kecamatan"]
-                    .dropna()
-                    .unique()
-                    .tolist()
-                )
-                with col_b2:
-                    batch_kec = st.selectbox("Kecamatan", options=kec_in_city if kec_in_city else ["-"], key="batch_wrk_kec")
-
-                sub_wrk_df = df_warkop_view[
-                    (df_warkop_view["Kota"].str.casefold() == batch_kota.casefold())
-                    & (df_warkop_view["Kecamatan"].astype(str) == str(batch_kec))
-                ].copy()
-
-                all_wrk_names = sub_wrk_df["Nama Warkop / LKK"].tolist()
-                default_wajib_names = [
-                    r["Nama Warkop / LKK"]
-                    for _, r in sub_wrk_df.iterrows()
-                    if r["Status Kunjungan"] == VISIT_STATUS_WAJIB
-                ]
-
-                with st.form("form_batch_status_warkop"):
-                    st.caption(f"Total warkop di kecamatan **{batch_kec}**: **{len(all_wrk_names)}** titik.")
-                    selected_wajib = st.multiselect(
-                        "🔒 Pilih Warkop yang WAJIB KUNJUNG",
-                        options=all_wrk_names,
-                        default=default_wajib_names,
-                        key=f"ms_wajib_{batch_kota}_{batch_kec}",
-                    )
-                    btn_save_batch = st.form_submit_button("💾 Simpan Pengaturan Wajib / Opsional Kecamatan Ini", type="primary")
-
-                    if btn_save_batch:
-                        wajib_set = {str(x).strip().casefold() for x in selected_wajib}
-                        for _, r in sub_wrk_df.iterrows():
-                            k_str = _warkop_status_key(r["Kota"], r["Kecamatan"], r["Nama Warkop / LKK"])
-                            if str(r["Nama Warkop / LKK"]).strip().casefold() in wajib_set:
-                                status_map_current[k_str] = VISIT_STATUS_WAJIB
-                            else:
-                                status_map_current[k_str] = VISIT_STATUS_TIDAK_WAJIB
-                        if save_warkop_visit_status_map(status_map_current):
-                            st.success(
-                                f"✅ Pengaturan untuk **{batch_kec}** disimpan: "
-                                f"**{len(selected_wajib)} Wajib Kunjung** & "
-                                f"**{max(0, len(all_wrk_names) - len(selected_wajib))} Opsional**."
-                            )
-                            st.rerun()
-
         with tab_wrk_manage:
             st.markdown("#### Kelola & edit data warkop aktif")
             st.caption("Filter berdasarkan Kota, Kecamatan, atau Status Kunjungan untuk mengubah atau menghapus titik warkop.")
@@ -2129,7 +2228,6 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                     warkop_col_name = next((c for c in df_lokasi_excel.columns if "warkop" in c.lower() or "lkk" in c.lower() or "nama" in c.lower()), "Nama Warkop / LKK")
                     alamat_col_name = next((c for c in df_lokasi_excel.columns if "alamat" in c.lower() or "address" in c.lower()), "Alamat Warkop / LKK")
 
-                    # Update status_map & sinkronkan baris ke df_lokasi_excel
                     updated_lokasi = df_lokasi_excel.copy()
                     for _, er in edited_wrk_df.iterrows():
                         k_v = str(er.get("Kota", "")).strip()
