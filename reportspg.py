@@ -976,13 +976,35 @@ def add_custom_week_columns(df, date_col="Waktu_Dt"):
     return df
 
 
+def _file_mtime(path: str) -> float:
+    return os.path.getmtime(path) if os.path.exists(path) else 0.0
+
+
+@st.cache_data(show_spinner=False)
+def _cached_read_csv(path: str, mtime: float) -> pd.DataFrame:
+    return pd.read_csv(path)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_read_excel(path: str, mtime: float) -> pd.DataFrame:
+    df = pd.read_excel(path)
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def _cached_read_json(path: str, mtime: float):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 # ====================================================
 # DATABASE TRANSAKSI & SUPERVISI
 # ====================================================
 def load_database():
     if os.path.exists(DB_FILE):
         try:
-            df = pd.read_csv(DB_FILE)
+            df = _cached_read_csv(DB_FILE, _file_mtime(DB_FILE)).copy()
             if "Usia" in df.columns and "Range_Umur" not in df.columns:
                 df = df.rename(columns={"Usia": "Range_Umur"})
             for col in EXPECTED_COLUMNS:
@@ -1001,7 +1023,7 @@ def save_database(df):
 def load_supervisi_database():
     if os.path.exists(DB_SUPERVISI_KONTAK_FILE):
         try:
-            df = pd.read_csv(DB_SUPERVISI_KONTAK_FILE)
+            df = _cached_read_csv(DB_SUPERVISI_KONTAK_FILE, _file_mtime(DB_SUPERVISI_KONTAK_FILE)).copy()
             for col in EXPECTED_SUPERVISI_COLUMNS:
                 if col not in df.columns:
                     df[col] = "-"
@@ -1122,39 +1144,134 @@ def get_supervisi_points_today(
 
 
 # ====================================================
-# MASTER WILAYAH / GEOJSON
+# MASTER WILAYAH / GEOJSON (ON-DEMAND PER KECAMATAN)
 # ====================================================
-@st.cache_data
-def load_master_wilayah(kota):
-    if kota == "Surabaya":
-        filename = "Surabaya Barat.geojson"
-    elif kota == "Gresik":
-        filename = "Gresik.geojson"
+GEOJSON_INDEX_FILE = os.path.join("geojson_by_kecamatan", "_index.json")
+
+KECAMATAN_BY_KOTA = {
+    "Surabaya": [
+        "Asem Rowo", "Benowo", "Bubutan", "Dukuh Pakis", "Genteng",
+        "Karang Pilang", "Krembangan", "Lakarsantri", "Pabean Cantian",
+        "Pakal", "Sambikerep", "Sawahan", "Sukomanunggal", "Tandes",
+        "Tegalsari", "Wiyung",
+    ],
+    "Gresik": [
+        "Balongpanggang", "Benjeng", "Bungah", "Cerme", "Driyorejo",
+        "Duduksampeyan", "Dukun", "Gresik", "Kebomas", "Kedamean",
+        "Manyar", "Menganti", "Panceng", "Sangkapura", "Sidayu",
+        "Tambak", "Ujungpangkah", "Wringinanom",
+    ],
+}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_geojson_index(mtime: float = 0.0) -> dict:
+    """Membaca indeks ringan (_index.json) tanpa memuat geometri poligon."""
+    if os.path.exists(GEOJSON_INDEX_FILE):
+        try:
+            raw_idx = _cached_read_json(GEOJSON_INDEX_FILE, _file_mtime(GEOJSON_INDEX_FILE))
+            if isinstance(raw_idx, dict):
+                return {
+                    str(k).strip().casefold(): {"nm_kecamatan": str(k).strip(), **v}
+                    for k, v in raw_idx.items()
+                    if isinstance(v, dict)
+                }
+        except Exception:
+            pass
+    return {}
+
+
+def _resolve_kecamatan_filepath(nm_kecamatan: str) -> str | None:
+    if not nm_kecamatan:
+        return None
+    target = str(nm_kecamatan).strip()
+    idx = load_geojson_index(_file_mtime(GEOJSON_INDEX_FILE))
+    entry = idx.get(target.casefold())
+    if entry and entry.get("file"):
+        cand = entry["file"]
+        if os.path.exists(cand):
+            return cand
+        base_cand = os.path.join("geojson_by_kecamatan", os.path.basename(cand))
+        if os.path.exists(base_cand):
+            return base_cand
+
+    slug = re.sub(r"[^a-z0-9]+", "_", target.lower()).strip("_")
+    fallback_path = os.path.join("geojson_by_kecamatan", f"{slug}.geojson")
+    if os.path.exists(fallback_path):
+        return fallback_path
+    return None
+
+
+@st.cache_data(ttl=3600, max_entries=40, show_spinner=False)
+def load_kecamatan_geojson(nm_kecamatan: str, mtime: float = 0.0) -> dict | None:
+    """Memuat file GeoJSON 1 kecamatan secara on-demand (2D, presisi 6 desimal)."""
+    filepath = _resolve_kecamatan_filepath(nm_kecamatan)
+    if not filepath:
+        return None
+    try:
+        return _cached_read_json(filepath, _file_mtime(filepath))
+    except Exception as e:
+        st.error(f"Gagal memuat GeoJSON kecamatan '{nm_kecamatan}': {e}")
+        return None
+
+
+@st.cache_data(ttl=3600, max_entries=40, show_spinner=False)
+def load_kecamatan_gdf(nm_kecamatan: str, mtime: float = 0.0):
+    """Mengonversi 1 file GeoJSON kecamatan ke GeoDataFrame hanya saat dibutuhkan."""
+    data = load_kecamatan_geojson(nm_kecamatan, mtime)
+    if not data:
+        return None
+    try:
+        gdf = gpd.GeoDataFrame.from_features(data)
+        if gdf.crs is None:
+            gdf.set_crs("EPSG:4326", inplace=True)
+        return gdf
+    except Exception as e:
+        st.error(f"Gagal memproses geometri kecamatan '{nm_kecamatan}': {e}")
+        return None
+
+
+def load_master_wilayah(kota, kecamatan_list=None):
+    """Kompatibilitas mundur: memuat GeoDataFrame per kecamatan terpilih saja jika diberikan,
+    atau seluruh kecamatan kota dari folder geojson_by_kecamatan/ jika kecamatan_list=None."""
+    k_norm = str(kota or "").strip().casefold()
+    if k_norm == "surabaya":
+        all_kec = KECAMATAN_BY_KOTA["Surabaya"]
+    elif k_norm == "gresik":
+        all_kec = KECAMATAN_BY_KOTA["Gresik"]
     else:
         return None
 
-    try:
-        with open(filename, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        gdf_master = gpd.GeoDataFrame.from_features(data)
-        if gdf_master.crs is None:
-            gdf_master.set_crs("EPSG:4326", inplace=True)
-        return gdf_master
-    except Exception as e:
-        st.error(f"Gagal memuat file master wilayah '{filename}': {e}")
+    target_kec = (
+        [str(k).strip() for k in kecamatan_list if str(k).strip()]
+        if kecamatan_list is not None
+        else all_kec
+    )
+    gdfs = []
+    for kec in target_kec:
+        fp = _resolve_kecamatan_filepath(kec)
+        gdf_k = load_kecamatan_gdf(kec, _file_mtime(fp) if fp else 0.0)
+        if gdf_k is not None and not gdf_k.empty:
+            gdf_copy = gdf_k.copy()
+            if "nm_kecamatan" not in gdf_copy.columns:
+                gdf_copy["nm_kecamatan"] = kec
+            gdfs.append(gdf_copy)
+
+    if not gdfs:
         return None
+    combined = pd.concat(gdfs, ignore_index=True)
+    return gpd.GeoDataFrame(combined, crs="EPSG:4326")
 
 
 def get_geo_districts(kota: str) -> list[str]:
-    gdf = load_master_wilayah(kota)
-    if gdf is None or gdf.empty:
-        return []
-    for col in ["nm_kecamatan", "KECAMATAN", "kecamatan", "Name", "NAME"]:
-        if col in gdf.columns:
-            return sorted(
-                {str(v).strip() for v in gdf[col].dropna().tolist() if str(v).strip()}
-            )
-    return []
+    """Mengambil daftar nama kecamatan secara ringan tanpa memuat seluruh poligon."""
+    k_norm = str(kota or "").strip().casefold()
+    if k_norm == "surabaya":
+        return sorted(KECAMATAN_BY_KOTA["Surabaya"])
+    if k_norm == "gresik":
+        return sorted(KECAMATAN_BY_KOTA["Gresik"])
+    idx = load_geojson_index(_file_mtime(GEOJSON_INDEX_FILE))
+    return sorted(v["nm_kecamatan"] for v in idx.values())
 
 
 def get_scheduled_slots_for_date(target_date: date | None = None) -> list[dict]:
@@ -1355,8 +1472,7 @@ def save_master_plat_kendaraan(plat_list):
 def load_master_lokasi_excel():
     if os.path.exists(MASTER_LOKASI_FILE):
         try:
-            df_excel = pd.read_excel(MASTER_LOKASI_FILE)
-            df_excel.columns = [str(c).strip() for c in df_excel.columns]
+            df_excel = _cached_read_excel(MASTER_LOKASI_FILE, _file_mtime(MASTER_LOKASI_FILE)).copy()
             return df_excel
         except Exception as e:
             st.error(f"Gagal membaca file Excel {MASTER_LOKASI_FILE}: {e}")
@@ -1401,8 +1517,7 @@ def save_master_spgs(spgs):
 def load_jadwal_spg():
     if os.path.exists(JADWAL_SPG_FILE):
         try:
-            df_jadwal = pd.read_excel(JADWAL_SPG_FILE)
-            df_jadwal.columns = [str(c).strip() for c in df_jadwal.columns]
+            df_jadwal = _cached_read_excel(JADWAL_SPG_FILE, _file_mtime(JADWAL_SPG_FILE)).copy()
             return df_jadwal
         except Exception as e:
             st.error(f"Gagal membaca file Jadwal SPG {JADWAL_SPG_FILE}: {e}")
@@ -2439,32 +2554,76 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             if not relevant_kotas:
                 relevant_kotas = ["Surabaya", "Gresik"]
 
-            city_palette = {
-                "surabaya": {"fill": [30, 144, 255, 35], "line": [37, 99, 235, 210]},
-                "gresik": {"fill": [16, 185, 129, 35], "line": [5, 150, 105, 210]},
-            }
             layers_list = []
+            kecamatan_dari_data = []
+            if not df_filtered_map.empty and "Kecamatan" in df_filtered_map.columns:
+                seen_kec = set()
+                for raw_kec in df_filtered_map["Kecamatan"].dropna().astype(str):
+                    kc_clean = raw_kec.strip()
+                    if kc_clean and kc_clean != "-" and kc_clean.casefold() not in seen_kec:
+                        seen_kec.add(kc_clean.casefold())
+                        kecamatan_dari_data.append(kc_clean)
+
+            opsi_kec_peta = []
+            seen_opsi = set()
             for kota_name in relevant_kotas:
-                gdf_kota = load_master_wilayah(kota_name)
-                if gdf_kota is not None and not gdf_kota.empty:
-                    gdf_kota_copy = gdf_kota.copy()
-                    if "Kota_Wilayah" not in gdf_kota_copy.columns:
-                        gdf_kota_copy["Kota_Wilayah"] = kota_name
-                    palette = city_palette.get(
-                        kota_name.casefold(),
-                        {"fill": [99, 102, 241, 35], "line": [79, 70, 229, 210]},
+                for kc_item in get_geo_districts(kota_name):
+                    if kc_item.casefold() not in seen_opsi:
+                        seen_opsi.add(kc_item.casefold())
+                        opsi_kec_peta.append(kc_item)
+            for kc_item in kecamatan_dari_data:
+                if kc_item.casefold() not in seen_opsi:
+                    seen_opsi.add(kc_item.casefold())
+                    opsi_kec_peta.append(kc_item)
+
+            default_kec_peta = [
+                kc for kc in kecamatan_dari_data
+                if any(kc.casefold() == op.casefold() for op in opsi_kec_peta)
+            ]
+            if not default_kec_peta and opsi_kec_peta:
+                default_kec_peta = opsi_kec_peta[:3]
+
+            kecamatan_peta_terpilih = st.multiselect(
+                "Poligon Kecamatan Ditampilkan (On-Demand)",
+                options=opsi_kec_peta,
+                default=default_kec_peta,
+                key="peta_filter_kecamatan_geojson",
+                help="Memuat file GeoJSON per kecamatan secara on-demand agar peta cepat dan ringan.",
+            )
+
+            gresik_set = {k.casefold() for k in KECAMATAN_BY_KOTA["Gresik"]}
+            features_gabungan = []
+            for kec_name in kecamatan_peta_terpilih:
+                fp_kec = _resolve_kecamatan_filepath(kec_name)
+                gj_kec = load_kecamatan_geojson(kec_name, _file_mtime(fp_kec) if fp_kec else 0.0)
+                if gj_kec and isinstance(gj_kec.get("features"), list):
+                    is_gresik = kec_name.strip().casefold() in gresik_set
+                    fill_col = [16, 185, 129, 35] if is_gresik else [30, 144, 255, 35]
+                    line_col = [5, 150, 105, 210] if is_gresik else [37, 99, 235, 210]
+                    kota_label = "Gresik" if is_gresik else "Surabaya"
+                    for feat in gj_kec["features"]:
+                        props = dict(feat.get("properties") or {})
+                        props.setdefault("Kota_Wilayah", kota_label)
+                        props["fill_color"] = fill_col
+                        props["line_color"] = line_col
+                        features_gabungan.append({
+                            "type": "Feature",
+                            "properties": props,
+                            "geometry": feat.get("geometry"),
+                        })
+
+            if features_gabungan:
+                layers_list.append(
+                    pdk.Layer(
+                        "GeoJsonLayer",
+                        data={"type": "FeatureCollection", "features": features_gabungan},
+                        get_fill_color="properties.fill_color",
+                        get_line_color="properties.line_color",
+                        get_line_width=40,
+                        pickable=True,
+                        auto_highlight=True,
                     )
-                    layers_list.append(
-                        pdk.Layer(
-                            "GeoJsonLayer",
-                            data=gdf_kota_copy.__geo_interface__,
-                            get_fill_color=palette["fill"],
-                            get_line_color=palette["line"],
-                            get_line_width=40,
-                            pickable=True,
-                            auto_highlight=True,
-                        )
-                    )
+                )
 
             if not df_filtered_map.empty:
                 df_filtered_map = df_filtered_map.sort_values(
@@ -3396,19 +3555,7 @@ with col_logout:
         st.session_state["logged_in"] = False
         st.rerun()
 
-gdf_wilayah = load_master_wilayah(st.session_state["kota_kab"])
-
-col_kec = None
-daftar_kecamatan = []
-if gdf_wilayah is not None:
-    for c in ["nm_kecamatan", "KECAMATAN", "kecamatan", "Name", "NAME"]:
-        if c in gdf_wilayah.columns:
-            col_kec = c
-            break
-    if col_kec:
-        daftar_kecamatan = sorted(gdf_wilayah[col_kec].dropna().unique().tolist())
-    else:
-        daftar_kecamatan = ["Kecamatan Default"]
+daftar_kecamatan = get_geo_districts(st.session_state["kota_kab"]) or ["Kecamatan Default"]
 
 # GPS
 loc = get_geolocation()
@@ -3426,15 +3573,34 @@ else:
     point_user = Point(user_lon, user_lat)
     is_inside_geofence = False
 
-    if gdf_wilayah is not None:
-        for _, row_geom in gdf_wilayah.iterrows():
-            geom = row_geom.geometry
-            if geom is not None and (geom.contains(point_user) or geom.intersects(point_user)):
-                is_inside_geofence = True
-                if col_kec and pd.notna(row_geom[col_kec]):
-                    detected_kecamatan = str(row_geom[col_kec]).strip()
-                break
-    else:
+    sched_ok_gps, _, _, kec_terjadwal_gps, _ = get_schedule_info_for_team(st.session_state["user_spg"])
+    kandidat_kec_gps = [k for k in (kec_terjadwal_gps or []) if k] if sched_ok_gps else []
+    if not kandidat_kec_gps:
+        kandidat_kec_gps = [k for k in daftar_kecamatan if k != "Kecamatan Default"]
+
+    checked_any_geom = False
+    for kc_cand in kandidat_kec_gps:
+        fp_cand = _resolve_kecamatan_filepath(kc_cand)
+        gdf_cand = load_kecamatan_gdf(kc_cand, _file_mtime(fp_cand) if fp_cand else 0.0)
+        if gdf_cand is not None and not gdf_cand.empty:
+            checked_any_geom = True
+            col_kec_cand = next(
+                (c for c in ["nm_kecamatan", "KECAMATAN", "kecamatan", "Name", "NAME"] if c in gdf_cand.columns),
+                None,
+            )
+            for _, row_geom in gdf_cand.iterrows():
+                geom = row_geom.geometry
+                if geom is not None and (geom.contains(point_user) or geom.intersects(point_user)):
+                    is_inside_geofence = True
+                    detected_kecamatan = (
+                        str(row_geom[col_kec_cand]).strip()
+                        if col_kec_cand and pd.notna(row_geom[col_kec_cand])
+                        else kc_cand
+                    )
+                    break
+        if is_inside_geofence:
+            break
+    if not checked_any_geom:
         is_inside_geofence = True
 
 is_inside_geofence = True
