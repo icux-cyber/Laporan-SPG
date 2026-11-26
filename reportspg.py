@@ -2635,12 +2635,19 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
                     pdk.Layer(
                         "GeoJsonLayer",
                         data={"type": "FeatureCollection", "features": features_gabungan},
+                        stroked=True,
+                        filled=True,
                         get_fill_color="properties.fill_color",
                         get_line_color="properties.line_color",
-                        get_line_width=40,
+                        get_line_width=3,
+                        line_width_min_pixels=2,
                         pickable=True,
                         auto_highlight=True,
                     )
+                )
+            elif kecamatan_peta_terpilih:
+                st.warning(
+                    "⚠️ File GeoJSON untuk kecamatan terpilih tidak ditemukan atau kosong di folder `geojson_by_kecamatan/`."
                 )
 
             if not df_filtered_map.empty:
