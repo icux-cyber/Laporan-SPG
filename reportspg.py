@@ -432,6 +432,92 @@ EXPECTED_SUPERVISI_COLUMNS = [
 ]
 
 LOCKED_LKK_POINT_FILE = "titik_lkk_aktif_team.json"
+WARKOP_VISIT_STATUS_FILE = "status_warkop_kunjungan.json"
+
+VISIT_STATUS_WAJIB = "Wajib Kunjung"
+VISIT_STATUS_TIDAK_WAJIB = "Opsional"
+VISIT_STATUS_OPTIONS = [VISIT_STATUS_WAJIB, VISIT_STATUS_TIDAK_WAJIB]
+
+
+def _warkop_status_key(kota: str, kecamatan: str, warkop: str) -> str:
+    return "|".join([
+        str(kota or "").strip().casefold(),
+        str(kecamatan or "").strip().casefold(),
+        str(warkop or "").strip().casefold(),
+    ])
+
+
+def load_warkop_visit_status_map() -> dict:
+    if os.path.exists(WARKOP_VISIT_STATUS_FILE):
+        try:
+            with open(WARKOP_VISIT_STATUS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+        except Exception:
+            pass
+    return {}
+
+
+def save_warkop_visit_status_map(status_map: dict) -> bool:
+    try:
+        cleaned = {}
+        for k, v in (status_map or {}).items():
+            val = str(v or "").strip()
+            if val in VISIT_STATUS_OPTIONS:
+                cleaned[str(k)] = val
+            elif "tidak" in val.casefold() or "opsional" in val.casefold():
+                cleaned[str(k)] = VISIT_STATUS_TIDAK_WAJIB
+            else:
+                cleaned[str(k)] = VISIT_STATUS_WAJIB
+        with open(WARKOP_VISIT_STATUS_FILE, "w", encoding="utf-8") as f:
+            json.dump(cleaned, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        st.error(f"Gagal menyimpan status warkop wajib/tidak wajib: {e}")
+        return False
+
+
+def get_warkop_visit_status(kota: str, kecamatan: str, warkop: str, status_map: dict | None = None) -> str:
+    smap = status_map if isinstance(status_map, dict) else load_warkop_visit_status_map()
+    key = _warkop_status_key(kota, kecamatan, warkop)
+    raw_val = smap.get(key)
+    if raw_val in VISIT_STATUS_OPTIONS:
+        return raw_val
+    # Fallback pencocokan berdasarkan Kecamatan & Nama Warkop jika Kota kosong/berbeda
+    suffix = f"|{str(kecamatan or '').strip().casefold()}|{str(warkop or '').strip().casefold()}"
+    for k, v in smap.items():
+        if str(k).endswith(suffix) and v in VISIT_STATUS_OPTIONS:
+            return v
+    return VISIT_STATUS_WAJIB
+
+
+def build_warkop_status_dataframe(df_lokasi: pd.DataFrame, status_map: dict | None = None) -> pd.DataFrame:
+    smap = status_map if isinstance(status_map, dict) else load_warkop_visit_status_map()
+    if df_lokasi is None or df_lokasi.empty:
+        return pd.DataFrame(columns=["Kota", "Kecamatan", "Nama Warkop / LKK", "Alamat Warkop / LKK", "Status Kunjungan"])
+
+    c_kota = next((c for c in df_lokasi.columns if "kota" in str(c).lower()), None)
+    c_kec = next((c for c in df_lokasi.columns if "kec" in str(c).lower() or "wilayah" in str(c).lower()), None)
+    c_wrk = next((c for c in df_lokasi.columns if "warkop" in str(c).lower() or "lkk" in str(c).lower() or "nama" in str(c).lower()), None)
+    c_alm = next((c for c in df_lokasi.columns if "alamat" in str(c).lower() or "address" in str(c).lower()), None)
+
+    rows = []
+    for _, r in df_lokasi.iterrows():
+        kota_v = str(r.get(c_kota, "Surabaya") if c_kota else "Surabaya").strip() or "Surabaya"
+        kec_v = str(r.get(c_kec, "") if c_kec else "").strip()
+        wrk_v = str(r.get(c_wrk, "") if c_wrk else "").strip()
+        alm_v = str(r.get(c_alm, "-") if c_alm else "-").strip() or "-"
+        if not wrk_v:
+            continue
+        rows.append({
+            "Kota": kota_v,
+            "Kecamatan": kec_v,
+            "Nama Warkop / LKK": wrk_v,
+            "Alamat Warkop / LKK": alm_v,
+            "Status Kunjungan": get_warkop_visit_status(kota_v, kec_v, wrk_v, smap),
+        })
+    return pd.DataFrame(rows, columns=["Kota", "Kecamatan", "Nama Warkop / LKK", "Alamat Warkop / LKK", "Status Kunjungan"])
 
 
 def load_locked_lkk_points() -> dict:
@@ -450,6 +536,7 @@ def save_locked_lkk_point(team_name: str, point_info: dict) -> bool:
     all_locked = load_locked_lkk_points()
     key = str(team_name or "").strip().casefold()
     payload = dict(point_info)
+    payload["status_kunjungan"] = str(payload.get("status_kunjungan") or VISIT_STATUS_WAJIB).strip()
     payload["tanggal"] = today_str
     payload["locked_at"] = (datetime.utcnow() + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
     all_locked[key] = payload
@@ -478,11 +565,16 @@ def get_active_locked_lkk_point_today(team_name: str, fallback_kota: str = "") -
     kota = str(entry.get("kota", fallback_kota) or fallback_kota).strip()
     if fallback_kota and kota and kota.casefold() != str(fallback_kota).strip().casefold():
         return None
+    kec = str(entry.get("kecamatan", "") or "").strip()
+    status_kunjungan = str(entry.get("status_kunjungan") or "").strip()
+    if status_kunjungan not in VISIT_STATUS_OPTIONS:
+        status_kunjungan = get_warkop_visit_status(kota, kec, warkop)
     return {
         "kota": kota,
-        "kecamatan": str(entry.get("kecamatan", "") or "").strip(),
+        "kecamatan": kec,
         "warkop": warkop,
         "alamat": str(entry.get("alamat", "-") or "-").strip() or "-",
+        "status_kunjungan": status_kunjungan,
         "locked_at": str(entry.get("locked_at", "") or "").strip(),
     }
 
@@ -1840,54 +1932,268 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
             st.rerun()
         st.stop()
 
-    # --- MASTER LOKASI WARKOP ---
+    # --- MASTER LOKASI WARKOP (TAMPILAN SELARSAS MENU JADWAL SPG) ---
     elif st.session_state["admin_view"] == "Master_Lokasi":
-        st.markdown("## 📍 Master Data: Lokasi Warkop / LKK (Excel)")
-        st.caption("Mengelola data warkop/LKK dari file repository: Master WarkopLKK.xlsx")
+        st.markdown("## 📍 Entry & Pengaturan Warkop Wajib / Tidak Wajib Kunjung")
+        st.caption("Kelola daftar warkop/LKK dengan memilih titik **Wajib Kunjung**; sisa titik otomatis menjadi **Opsional** tanpa batas jumlah.")
 
         df_lokasi_excel = load_master_lokasi_excel()
+        status_map_current = load_warkop_visit_status_map()
+        df_warkop_view = build_warkop_status_dataframe(df_lokasi_excel, status_map_current)
 
-        with st.form("form_tambah_lokasi_excel"):
-            st.markdown("#### Tambah Baris Warkop / LKK Baru ke Excel")
-            col_kota_input = st.selectbox("Kota", options=["Surabaya", "Gresik"], key="add_l_kota")
-            col_kec_input = st.text_input("Kecamatan", placeholder="Contoh: Tegalsari")
-            col_warkop_input = st.text_input("Nama Warkop / LKK", placeholder="Contoh: Warkop Barokah")
-            col_alamat_input = st.text_input("Alamat Warkop", placeholder="Contoh: Jl. Ngagel Tirto No. 10")
-            btn_add_excel = st.form_submit_button("➕ Tambah & Simpan ke Excel")
+        c_stat1, c_stat2, c_stat3 = st.columns(3)
+        jml_wajib = int((df_warkop_view["Status Kunjungan"] == VISIT_STATUS_WAJIB).sum()) if not df_warkop_view.empty else 0
+        jml_tidak_wajib = int((df_warkop_view["Status Kunjungan"] == VISIT_STATUS_TIDAK_WAJIB).sum()) if not df_warkop_view.empty else 0
+        with c_stat1:
+            st.metric("Total Titik Warkop / LKK", len(df_warkop_view))
+        with c_stat2:
+            st.metric("🔒 Wajib Kunjung", jml_wajib)
+        with c_stat3:
+            st.metric("🔓 Opsional", jml_tidak_wajib)
 
-            if btn_add_excel:
-                if col_kec_input.strip() and col_warkop_input.strip():
+        tab_wrk_add, tab_wrk_batch, tab_wrk_manage, tab_wrk_excel = st.tabs(
+            [
+                "➕ Tambah Warkop Baru",
+                "🔒 Atur Massal Wajib / Opsional",
+                "✏️ Kelola Warkop Aktif",
+                "📥 Download / Upload Excel",
+            ]
+        )
+
+        with tab_wrk_add:
+            st.markdown("#### Tambah titik warkop / LKK baru")
+            st.caption("Tentukan Kota, Kecamatan, Nama Warkop/LKK, Alamat, dan status Wajib Kunjung atau Opsional.")
+            with st.form("form_tambah_lokasi_excel"):
+                col_kota_input = st.selectbox("Kota / Kabupaten", options=["Surabaya", "Gresik"], key="add_l_kota")
+                kec_geo_opts = get_geo_districts(col_kota_input)
+                kec_existing_opts = sorted(
+                    df_warkop_view[df_warkop_view["Kota"].str.casefold() == col_kota_input.casefold()]["Kecamatan"]
+                    .dropna()
+                    .unique()
+                    .tolist()
+                )
+                kec_combined_opts = sorted(set(kec_geo_opts + kec_existing_opts))
+                col_kec_select = st.selectbox(
+                    "Pilih Kecamatan (atau ketik manual di bawah)",
+                    options=[""] + kec_combined_opts,
+                    key="add_l_kec_select",
+                )
+                col_kec_input = st.text_input(
+                    "Kecamatan",
+                    value=col_kec_select,
+                    placeholder="Contoh: Tegalsari atau Sawahan",
+                    key="add_l_kec_input",
+                )
+                col_warkop_input = st.text_input("Nama Warkop / LKK", placeholder="Contoh: Warkop Barokah", key="add_l_warkop")
+                col_alamat_input = st.text_input("Alamat Warkop", placeholder="Contoh: Jl. Ngagel Tirto No. 10", key="add_l_alamat")
+                col_status_input = st.selectbox(
+                    "Status Kunjungan",
+                    options=VISIT_STATUS_OPTIONS,
+                    index=0,
+                    key="add_l_status",
+                    help="Pilih Wajib Kunjung untuk titik prioritas wajib, atau Opsional untuk titik non-wajib.",
+                )
+                btn_add_excel = st.form_submit_button("💾 Simpan Warkop Baru", type="primary")
+
+                if btn_add_excel:
+                    kec_clean = col_kec_input.strip()
+                    wrk_clean = col_warkop_input.strip()
+                    if kec_clean and wrk_clean:
+                        kota_col_name = next((c for c in df_lokasi_excel.columns if "kota" in c.lower()), "Kota")
+                        kec_col_name = next((c for c in df_lokasi_excel.columns if "kec" in c.lower() or "wilayah" in c.lower()), "Kecamatan")
+                        warkop_col_name = next((c for c in df_lokasi_excel.columns if "warkop" in c.lower() or "lkk" in c.lower() or "nama" in c.lower()), "Nama Warkop / LKK")
+                        alamat_col_name = next((c for c in df_lokasi_excel.columns if "alamat" in c.lower() or "address" in c.lower()), "Alamat Warkop / LKK")
+
+                        new_row = {
+                            kota_col_name: col_kota_input,
+                            kec_col_name: kec_clean,
+                            warkop_col_name: wrk_clean,
+                            alamat_col_name: col_alamat_input.strip() if col_alamat_input.strip() else "-",
+                        }
+                        df_lokasi_excel = pd.concat([df_lokasi_excel, pd.DataFrame([new_row])], ignore_index=True)
+                        status_map_current[_warkop_status_key(col_kota_input, kec_clean, wrk_clean)] = col_status_input
+                        if save_master_lokasi_excel(df_lokasi_excel) and save_warkop_visit_status_map(status_map_current):
+                            st.success(f"✅ Warkop '{wrk_clean}' ({col_status_input}) berhasil disimpan!")
+                            st.rerun()
+                    else:
+                        st.warning("Mohon isi nama Kecamatan dan Nama Warkop/LKK.")
+
+        with tab_wrk_batch:
+            st.markdown("#### Atur daftar Warkop Wajib Kunjung per Kecamatan (sisanya otomatis Opsional)")
+            st.caption("Pilih Kota & Kecamatan, lalu pilih warkop mana saja yang **Wajib Kunjung** (bebas jumlahnya). Titik yang tidak dipilih otomatis berstatus **Opsional**.")
+            if df_warkop_view.empty:
+                st.info("Belum ada data warkop pada Master WarkopLKK.xlsx.")
+            else:
+                col_b1, col_b2 = st.columns(2)
+                with col_b1:
+                    batch_kota = st.selectbox("Kota / Kabupaten", options=sorted(df_warkop_view["Kota"].unique().tolist()), key="batch_wrk_kota")
+                kec_in_city = sorted(
+                    df_warkop_view[df_warkop_view["Kota"].str.casefold() == batch_kota.casefold()]["Kecamatan"]
+                    .dropna()
+                    .unique()
+                    .tolist()
+                )
+                with col_b2:
+                    batch_kec = st.selectbox("Kecamatan", options=kec_in_city if kec_in_city else ["-"], key="batch_wrk_kec")
+
+                sub_wrk_df = df_warkop_view[
+                    (df_warkop_view["Kota"].str.casefold() == batch_kota.casefold())
+                    & (df_warkop_view["Kecamatan"].astype(str) == str(batch_kec))
+                ].copy()
+
+                all_wrk_names = sub_wrk_df["Nama Warkop / LKK"].tolist()
+                default_wajib_names = [
+                    r["Nama Warkop / LKK"]
+                    for _, r in sub_wrk_df.iterrows()
+                    if r["Status Kunjungan"] == VISIT_STATUS_WAJIB
+                ]
+
+                with st.form("form_batch_status_warkop"):
+                    st.caption(f"Total warkop di kecamatan **{batch_kec}**: **{len(all_wrk_names)}** titik.")
+                    selected_wajib = st.multiselect(
+                        "🔒 Pilih Warkop yang WAJIB KUNJUNG",
+                        options=all_wrk_names,
+                        default=default_wajib_names,
+                        key=f"ms_wajib_{batch_kota}_{batch_kec}",
+                    )
+                    btn_save_batch = st.form_submit_button("💾 Simpan Pengaturan Wajib / Opsional Kecamatan Ini", type="primary")
+
+                    if btn_save_batch:
+                        wajib_set = {str(x).strip().casefold() for x in selected_wajib}
+                        for _, r in sub_wrk_df.iterrows():
+                            k_str = _warkop_status_key(r["Kota"], r["Kecamatan"], r["Nama Warkop / LKK"])
+                            if str(r["Nama Warkop / LKK"]).strip().casefold() in wajib_set:
+                                status_map_current[k_str] = VISIT_STATUS_WAJIB
+                            else:
+                                status_map_current[k_str] = VISIT_STATUS_TIDAK_WAJIB
+                        if save_warkop_visit_status_map(status_map_current):
+                            st.success(
+                                f"✅ Pengaturan untuk **{batch_kec}** disimpan: "
+                                f"**{len(selected_wajib)} Wajib Kunjung** & "
+                                f"**{max(0, len(all_wrk_names) - len(selected_wajib))} Opsional**."
+                            )
+                            st.rerun()
+
+        with tab_wrk_manage:
+            st.markdown("#### Kelola & edit data warkop aktif")
+            st.caption("Filter berdasarkan Kota, Kecamatan, atau Status Kunjungan untuk mengubah atau menghapus titik warkop.")
+            if df_warkop_view.empty:
+                st.info("Belum ada data warkop aktif.")
+            else:
+                col_f_k, col_f_kec, col_f_st = st.columns(3)
+                with col_f_k:
+                    f_kota_opts = ["Semua Kota"] + sorted(df_warkop_view["Kota"].unique().tolist())
+                    f_kota = st.selectbox("Filter Kota", options=f_kota_opts, key="wrk_manage_kota")
+                df_after_kota = df_warkop_view if f_kota == "Semua Kota" else df_warkop_view[df_warkop_view["Kota"] == f_kota]
+                with col_f_kec:
+                    f_kec_opts = ["Semua Kecamatan"] + sorted(df_after_kota["Kecamatan"].unique().tolist())
+                    f_kec = st.selectbox("Filter Kecamatan", options=f_kec_opts, key="wrk_manage_kec")
+                with col_f_st:
+                    f_st = st.selectbox("Filter Status Kunjungan", options=["Semua Status"] + VISIT_STATUS_OPTIONS, key="wrk_manage_status")
+
+                filtered_manage_df = df_after_kota.copy()
+                if f_kec != "Semua Kecamatan":
+                    filtered_manage_df = filtered_manage_df[filtered_manage_df["Kecamatan"] == f_kec]
+                if f_st != "Semua Status":
+                    filtered_manage_df = filtered_manage_df[filtered_manage_df["Status Kunjungan"] == f_st]
+
+                st.markdown(f"**{len(filtered_manage_df)} titik warkop ditampilkan**")
+                edited_wrk_df = st.data_editor(
+                    filtered_manage_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Status Kunjungan": st.column_config.SelectboxColumn(
+                            "Status Kunjungan",
+                            options=VISIT_STATUS_OPTIONS,
+                            required=True,
+                        )
+                    },
+                    key="editor_excel_warkop_terstruktur",
+                )
+                if st.button("💾 Simpan Perubahan Tabel Warkop", type="primary", key="btn_save_wrk_table"):
                     kota_col_name = next((c for c in df_lokasi_excel.columns if "kota" in c.lower()), "Kota")
                     kec_col_name = next((c for c in df_lokasi_excel.columns if "kec" in c.lower() or "wilayah" in c.lower()), "Kecamatan")
                     warkop_col_name = next((c for c in df_lokasi_excel.columns if "warkop" in c.lower() or "lkk" in c.lower() or "nama" in c.lower()), "Nama Warkop / LKK")
                     alamat_col_name = next((c for c in df_lokasi_excel.columns if "alamat" in c.lower() or "address" in c.lower()), "Alamat Warkop / LKK")
 
-                    new_row = {
-                        kota_col_name: col_kota_input,
-                        kec_col_name: col_kec_input.strip(),
-                        warkop_col_name: col_warkop_input.strip(),
-                        alamat_col_name: col_alamat_input.strip() if col_alamat_input else "-",
-                    }
-                    df_lokasi_excel = pd.concat([df_lokasi_excel, pd.DataFrame([new_row])], ignore_index=True)
-                    if save_master_lokasi_excel(df_lokasi_excel):
-                        st.success(f"✅ Warkop '{col_warkop_input.strip()}' berhasil ditambahkan!")
+                    # Update status_map & sinkronkan baris ke df_lokasi_excel
+                    updated_lokasi = df_lokasi_excel.copy()
+                    for _, er in edited_wrk_df.iterrows():
+                        k_v = str(er.get("Kota", "")).strip()
+                        kc_v = str(er.get("Kecamatan", "")).strip()
+                        w_v = str(er.get("Nama Warkop / LKK", "")).strip()
+                        a_v = str(er.get("Alamat Warkop / LKK", "-")).strip() or "-"
+                        st_v = str(er.get("Status Kunjungan", VISIT_STATUS_WAJIB)).strip()
+                        if not w_v:
+                            continue
+                        status_map_current[_warkop_status_key(k_v, kc_v, w_v)] = st_v
+                        m_idx = updated_lokasi[
+                            updated_lokasi[kec_col_name].astype(str).str.strip().str.casefold().eq(kc_v.casefold())
+                            & updated_lokasi[warkop_col_name].astype(str).str.strip().str.casefold().eq(w_v.casefold())
+                        ].index
+                        if len(m_idx) > 0:
+                            updated_lokasi.at[m_idx[0], kota_col_name] = k_v
+                            updated_lokasi.at[m_idx[0], alamat_col_name] = a_v
+
+                    if save_master_lokasi_excel(updated_lokasi) and save_warkop_visit_status_map(status_map_current):
+                        st.success("✅ Perubahan data warkop dan status Wajib / Opsional berhasil disimpan!")
                         st.rerun()
-                else:
-                    st.warning("Mohon isi nama Kecamatan dan Nama Warkop/LKK.")
+
+        with tab_wrk_excel:
+            st.markdown("#### Unduh dan unggah daftar warkop & status kunjungan melalui Excel")
+            st.caption("Download data warkop beserta kolom `Status Kunjungan` (`Wajib Kunjung` / `Opsional`), edit di Excel, lalu unggah kembali.")
+            wrk_export_buf = BytesIO()
+            with pd.ExcelWriter(wrk_export_buf, engine="openpyxl") as writer:
+                df_warkop_view.to_excel(writer, index=False, sheet_name="Master Warkop")
+
+            st.download_button(
+                "⬇️ Download Master Warkop & Status Kunjungan (.xlsx)",
+                data=wrk_export_buf.getvalue(),
+                file_name="Master WarkopLKK Status.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="download_master_warkop_status_xlsx",
+            )
+
+            uploaded_wrk_file = st.file_uploader(
+                "Pilih file Excel warkop untuk diunggah",
+                type=["xlsx"],
+                key="upload_master_warkop_xlsx",
+            )
+            if uploaded_wrk_file is not None:
+                try:
+                    df_up_wrk = pd.read_excel(uploaded_wrk_file)
+                    df_up_wrk.columns = [str(c).strip() for c in df_up_wrk.columns]
+                    st.dataframe(df_up_wrk.head(20), use_container_width=True, hide_index=True)
+                    if st.button("Ganti Master Warkop dengan File Excel Ini", type="primary", key="btn_confirm_up_wrk"):
+                        c_k = next((c for c in df_up_wrk.columns if "kota" in c.lower()), None) or "Kota"
+                        c_kc = next((c for c in df_up_wrk.columns if "kec" in c.lower() or "wilayah" in c.lower()), None) or "Kecamatan"
+                        c_w = next((c for c in df_up_wrk.columns if "warkop" in c.lower() or "lkk" in c.lower() or "nama" in c.lower()), None) or "Nama Warkop / LKK"
+                        c_a = next((c for c in df_up_wrk.columns if "alamat" in c.lower() or "address" in c.lower()), None) or "Alamat Warkop / LKK"
+                        c_s = next((c for c in df_up_wrk.columns if "status" in c.lower() or "wajib" in c.lower()), None)
+
+                        base_cols = [c for c in [c_k, c_kc, c_w, c_a] if c in df_up_wrk.columns]
+                        df_to_save_wrk = df_up_wrk[base_cols].copy()
+                        new_status_map = {}
+                        for _, r in df_up_wrk.iterrows():
+                            k_val = str(r.get(c_k, "Surabaya")).strip()
+                            kc_val = str(r.get(c_kc, "")).strip()
+                            w_val = str(r.get(c_w, "")).strip()
+                            if not w_val:
+                                continue
+                            raw_st = str(r.get(c_s, VISIT_STATUS_WAJIB) if c_s else VISIT_STATUS_WAJIB).strip()
+                            st_val = VISIT_STATUS_TIDAK_WAJIB if ("tidak" in raw_st.casefold() or "opsional" in raw_st.casefold()) else VISIT_STATUS_WAJIB
+                            new_status_map[_warkop_status_key(k_val, kc_val, w_val)] = st_val
+
+                        if save_master_lokasi_excel(df_to_save_wrk) and save_warkop_visit_status_map(new_status_map):
+                            st.success("✅ Master Warkop dan status Wajib / Opsional berhasil diperbarui dari Excel!")
+                            st.rerun()
+                except Exception as exc:
+                    st.error(f"Gagal membaca file Excel warkop: {exc}")
 
         st.markdown("---")
-        st.markdown("#### 📋 Preview Data Warkop/LKK dari Excel")
-        if not df_lokasi_excel.empty:
-            edited_df = st.data_editor(df_lokasi_excel, use_container_width=True, key="editor_excel_warkop")
-            if st.button("💾 Simpan Perubahan Edit Tabel"):
-                if save_master_lokasi_excel(edited_df):
-                    st.success("✅ Perubahan pada Master Warkop berhasil disimpan!")
-                    st.rerun()
-        else:
-            st.warning("File Excel master warkop kosong atau tidak ditemukan formatnya.")
-
-        st.markdown("---")
-        if st.button("⬅️ Kembali ke Dashboard"):
+        if st.button("⬅️ Kembali ke Dashboard", key="btn_back_master_lokasi"):
             st.session_state["admin_view"] = "Dashboard"
             st.rerun()
         st.stop()
@@ -3076,11 +3382,13 @@ with st.container(border=True):
 
     if st.session_state["login_mode"] == "Supervisi":
         col_sync_1, col_sync_2 = st.columns([0.78, 0.22])
+        status_map_sup = load_warkop_visit_status_map()
         with col_sync_1:
             if locked_point_today:
+                st_lock = locked_point_today.get("status_kunjungan", VISIT_STATUS_WAJIB)
                 st.success(
                     f"🔒 **Titik LKK Terkunci Hari Ini:** **{locked_point_today['warkop']}** "
-                    f"({locked_point_today['kecamatan']}) • SPG sudah diizinkan menginput di titik ini."
+                    f"({locked_point_today['kecamatan']}) • **{st_lock}** • SPG sudah diizinkan menginput di titik ini."
                 )
             else:
                 st.warning(
@@ -3103,6 +3411,13 @@ with st.container(border=True):
             help="Kecamatan difilter otomatis sesuai penugasan jadwal hari ini yang dikelola di menu admin.",
         )
 
+        filter_kategori_w = st.radio(
+            "Filter Kategori Warkop",
+            options=["Semua", VISIT_STATUS_WAJIB, VISIT_STATUS_TIDAK_WAJIB],
+            horizontal=True,
+            key="sup_filter_kategori_warkop",
+        )
+
         filtered_warkop_list = []
         if not df_master_excel.empty and col_kec_excel and col_warkop_excel:
             mask = (
@@ -3112,7 +3427,16 @@ with st.container(border=True):
             filtered_df_warkop = df_master_excel[mask]
             if filtered_df_warkop.empty:
                 filtered_df_warkop = df_master_excel.copy()
-            filtered_warkop_list = filtered_df_warkop[col_warkop_excel].dropna().unique().tolist()
+            raw_wrk_names = filtered_df_warkop[col_warkop_excel].dropna().astype(str).str.strip().tolist()
+            seen_w = set()
+            for w_item in raw_wrk_names:
+                if not w_item or w_item.casefold() in seen_w:
+                    continue
+                seen_w.add(w_item.casefold())
+                st_item = get_warkop_visit_status(st.session_state["kota_kab"], kecamatan_pilihan, w_item, status_map_sup)
+                if filter_kategori_w != "Semua" and st_item != filter_kategori_w:
+                    continue
+                filtered_warkop_list.append(w_item)
 
         if not filtered_warkop_list:
             filtered_warkop_list = ["Warkop Alternatif 1", "Warkop Alternatif 2"]
@@ -3125,7 +3449,11 @@ with st.container(border=True):
             f"Warkop / LKK di {kecamatan_pilihan}",
             options=filtered_warkop_list,
             index=default_w_idx,
-            help="Daftar warkop difilter otomatis dari Master WarkopLKK.xlsx",
+            format_func=lambda w_name: f"[{'WAJIB' if get_warkop_visit_status(st.session_state['kota_kab'], kecamatan_pilihan, w_name, status_map_sup) == VISIT_STATUS_WAJIB else 'OPSI'}] {w_name}",
+            help="Menampilkan status Wajib Kunjung / Opsional sesuai pengaturan Admin.",
+        )
+        status_warkop_terpilih = get_warkop_visit_status(
+            st.session_state["kota_kab"], kecamatan_pilihan, nama_warkop_manual, status_map_sup
         )
         alamat_warkop_terpilih = "-"
         if not df_master_excel.empty and col_warkop_excel and col_alamat_excel:
@@ -3144,11 +3472,12 @@ with st.container(border=True):
                     "kecamatan": str(kecamatan_pilihan).strip(),
                     "warkop": str(nama_warkop_manual).strip(),
                     "alamat": alamat_warkop_terpilih,
+                    "status_kunjungan": status_warkop_terpilih,
                 },
             )
             if saved_lock:
                 st.success(
-                    f"✅ Titik LKK **{str(nama_warkop_manual).strip()}** ({kecamatan_pilihan}) berhasil di-save & di-lock! "
+                    f"✅ Titik LKK **{str(nama_warkop_manual).strip()}** ({kecamatan_pilihan} • **{status_warkop_terpilih}**) berhasil di-save & di-lock! "
                     "SPG kini dapat menginput laporan di titik ini."
                 )
                 st.rerun()
@@ -3157,6 +3486,7 @@ with st.container(border=True):
         col_spg_s1, col_spg_s2 = st.columns([0.78, 0.22])
         with col_spg_s1:
             if locked_point_today:
+                st_lock_spg = locked_point_today.get("status_kunjungan", VISIT_STATUS_WAJIB)
                 kontak_info = (
                     f" • Kontak Tim Tersimpan: **{latest_sup_contact['kontak']}**"
                     if latest_sup_contact and latest_sup_contact.get("warkop", "").casefold() == locked_point_today["warkop"].casefold()
@@ -3164,7 +3494,7 @@ with st.container(border=True):
                 )
                 st.success(
                     f"🔒 **Titik LKK Terkunci (Dari Supervisi):** **{locked_point_today['warkop']}** "
-                    f"({locked_point_today['kecamatan']}){kontak_info}"
+                    f"({locked_point_today['kecamatan']} • **{st_lock_spg}**){kontak_info}"
                 )
             else:
                 st.error(
@@ -3179,14 +3509,16 @@ with st.container(border=True):
             kecamatan_pilihan = locked_point_today["kecamatan"] or "-"
             nama_warkop_manual = locked_point_today["warkop"]
             alamat_warkop_terpilih = locked_point_today["alamat"]
+            status_warkop_terpilih = locked_point_today.get("status_kunjungan", VISIT_STATUS_WAJIB)
         else:
             kecamatan_pilihan = "-"
             nama_warkop_manual = ""
             alamat_warkop_terpilih = "-"
+            status_warkop_terpilih = "-"
 
     st.markdown(f"""
     <div class="address-box">
-        📍 <b>Kecamatan:</b> {kecamatan_pilihan} &nbsp;|&nbsp; <b>Warkop / LKK:</b> {nama_warkop_manual or '(Belum di-save Supervisi)'}<br/>
+        📍 <b>Kecamatan:</b> {kecamatan_pilihan} &nbsp;|&nbsp; <b>Warkop / LKK:</b> {nama_warkop_manual or '(Belum di-save Supervisi)'} &nbsp;|&nbsp; <b>Status:</b> {status_warkop_terpilih}<br/>
         🏠 <b>Alamat:</b> {alamat_warkop_terpilih}
     </div>
     """, unsafe_allow_html=True)
