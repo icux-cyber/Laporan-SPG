@@ -47,6 +47,21 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+if str(st.query_params.get("page", "")).strip().lower() != "admin":
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebar"],
+        [data-testid="stSidebarNav"],
+        [data-testid="collapsedControl"] {
+            display: none !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 
 def get_team_theme(team_name: str) -> dict:
     """Mengembalikan konfigurasi palet warna dinamis berdasarkan nama team."""
@@ -1765,9 +1780,18 @@ if "sup_kontak_nonce" not in st.session_state:
     st.session_state["sup_kontak_nonce"] = 0
 
 # ====================================================
-# SIDEBAR ADMIN (TERORGANISIR)
+# AKSES TERPISAH HALAMAN ADMIN VIA QUERY PARAM (?page=admin)
 # ====================================================
-if not st.session_state["logged_in"]:
+_qp_page = str(st.query_params.get("page", "")).strip().lower()
+_admin_portal_requested = (_qp_page == "admin")
+
+if not _admin_portal_requested and st.session_state.get("admin_logged_in"):
+    st.session_state["admin_logged_in"] = False
+
+# ====================================================
+# SIDEBAR ADMIN (HANYA TAMPIL SAAT ?page=admin AKTIF)
+# ====================================================
+if _admin_portal_requested and not st.session_state["logged_in"]:
     with st.sidebar:
         st.markdown("### 🔐 Panel Admin & Supervisor")
         st.caption("Pusat kontrol data lapangan dan konfigurasi master.")
@@ -1825,12 +1849,13 @@ if not st.session_state["logged_in"]:
             st.markdown("---")
             if st.button("🔒 Keluar Mode Admin", use_container_width=True):
                 st.session_state["admin_logged_in"] = False
+                st.query_params.clear()
                 st.rerun()
 
 # ====================================================
 # HALAMAN ADMIN
 # ====================================================
-if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
+if _admin_portal_requested and not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
 
     # --- MASTER NAMA TEAM ---
     if st.session_state["admin_view"] == "Master_Nama_Team":
@@ -3420,7 +3445,34 @@ if not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
     st.stop()
 
 # ====================================================
-# HALAMAN LOGIN UTAMA
+# PORTAL LOGIN KHUSUS ADMIN (?page=admin)
+# ====================================================
+if _admin_portal_requested and not st.session_state["logged_in"] and not st.session_state["admin_logged_in"]:
+    st.markdown(
+        """
+        <div class="login-header">
+            <div style="font-size: 2.2rem; margin-bottom: 4px;">🔐</div>
+            <h1>PORTAL ADMIN &amp; SUPERVISOR</h1>
+            <p>Akses Khusus Pengelola Data Master &amp; Monitoring</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.container(border=True):
+        with st.form("form_admin_portal_login"):
+            admin_pass_main = st.text_input("Kata Sandi Admin", type="password", placeholder="Masukkan kata sandi admin")
+            btn_admin_portal = st.form_submit_button("🔓 Masuk Halaman Admin", type="primary", use_container_width=True)
+            if btn_admin_portal:
+                if admin_pass_main == "admin123":
+                    st.session_state["admin_logged_in"] = True
+                    st.session_state["admin_view"] = "Dashboard"
+                    st.rerun()
+                else:
+                    st.error("❌ Kata sandi admin salah!")
+    st.stop()
+
+# ====================================================
+# HALAMAN LOGIN UTAMA (SPG & SUPERVISI LAPANGAN)
 # ====================================================
 if not st.session_state["logged_in"]:
     st.markdown(
@@ -3542,7 +3594,6 @@ if not st.session_state["logged_in"]:
     st.markdown(
         """
         <div class="footer-note">
-            Buka menu samping kiri (<b>&gt;</b>) untuk akses <b>Dashboard Admin</b><br/>
             © 2026 Tumarso Monitoring System
         </div>
         """,
