@@ -3721,7 +3721,7 @@ if not st.session_state["logged_in"]:
     )
 
     st.markdown('<div class="section-title">1️⃣ Pilih Peran Masuk</div>', unsafe_allow_html=True)
-    col_btn_mode1, col_btn_mode2 = st.columns(2)
+    col_btn_mode1, col_btn_mode2 = st.columns(3)
     with col_btn_mode1:
         if st.button(
             "📝 Masuk sebagai SPG",
@@ -3738,6 +3738,15 @@ if not st.session_state["logged_in"]:
             type="primary" if st.session_state["login_mode"] == "Supervisi" else "secondary",
         ):
             st.session_state["login_mode"] = "Supervisi"
+            st.rerun()
+
+    with col_btn_mode3:
+        if st.button(
+            "Rekapitulasi Penjualan",
+            use_container_width=True,
+            type="primary" if st.session_state["login_mode"] == "Supervisi" else "secondary",
+        ):
+            st.session_state["login_mode"] = "Rekapitulasi"
             st.rerun()
 
     st.markdown('<div class="section-title">2️⃣ Pilih Tim &amp; Verifikasi Jadwal</div>', unsafe_allow_html=True)
