@@ -14,7 +14,7 @@ import pandas as pd
 import streamlit as st
 
 
-SCHEDULE_FILE = "Jadwal SPG.xlsx"
+SCHEDULE_FILE = "Jadwal_SPG_1.1.xlsx"
 SCHEDULE_DETAIL_FILE = "jadwal_spg_detail.json"
 TEAM_NAMES_FILE = "master_nama_team.json"
 TEAM_BRANDS_FILE = "master_team_brand.json"
