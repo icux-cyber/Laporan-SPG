@@ -1,5 +1,7 @@
 from datetime import date, datetime, timedelta
 from io import BytesIO
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -411,6 +413,93 @@ MASTER_BRAND_FILE = "master_brand_rokok.json"
 MASTER_TARGET_FILE = "master_target_brand.json"
 MASTER_HARGA_FILE = "master_harga_konsumen.json"
 STOK_SUPERVISI_FILE = "stok_rokok_supervisi.json"
+MASTER_AKSES_FILE = "master_akses_user.json"
+
+DEFAULT_SUPERVISI_PIN = "1122"
+DEFAULT_SPG_PIN = "2233"
+
+
+def _hash_pin(pin_plain: str) -> str:
+    return hashlib.sha256(str(pin_plain or "").strip().encode("utf-8")).hexdigest()
+
+
+def load_master_akses() -> dict:
+    """Memuat pengaturan PIN/akses per peran & per nama personil."""
+    data = _cached_read_json_no_mtime(MASTER_AKSES_FILE)
+    base = {
+        "supervisi_default_pin": DEFAULT_SUPERVISI_PIN,
+        "spg_default_pin": DEFAULT_SPG_PIN,
+        "require_spg_pin": False,
+        "supervisi_pins": {},
+        "spg_pins": {},
+    }
+    if isinstance(data, dict):
+        base["supervisi_default_pin"] = str(data.get("supervisi_default_pin") or DEFAULT_SUPERVISI_PIN).strip()
+        base["spg_default_pin"] = str(data.get("spg_default_pin") or DEFAULT_SPG_PIN).strip()
+        base["require_spg_pin"] = bool(data.get("require_spg_pin", False))
+        if isinstance(data.get("supervisi_pins"), dict):
+            base["supervisi_pins"] = {
+                str(k).strip(): str(v).strip()
+                for k, v in data["supervisi_pins"].items()
+                if str(k).strip() and str(v).strip()
+            }
+        if isinstance(data.get("spg_pins"), dict):
+            base["spg_pins"] = {
+                str(k).strip(): str(v).strip()
+                for k, v in data["spg_pins"].items()
+                if str(k).strip() and str(v).strip()
+            }
+    return base
+
+
+def save_master_akses(akses_cfg: dict) -> bool:
+    payload = {
+        "supervisi_default_pin": str(akses_cfg.get("supervisi_default_pin") or DEFAULT_SUPERVISI_PIN).strip(),
+        "spg_default_pin": str(akses_cfg.get("spg_default_pin") or DEFAULT_SPG_PIN).strip(),
+        "require_spg_pin": bool(akses_cfg.get("require_spg_pin", False)),
+        "supervisi_pins": {
+            str(k).strip(): str(v).strip()
+            for k, v in (akses_cfg.get("supervisi_pins") or {}).items()
+            if str(k).strip() and str(v).strip()
+        },
+        "spg_pins": {
+            str(k).strip(): str(v).strip()
+            for k, v in (akses_cfg.get("spg_pins") or {}).items()
+            if str(k).strip() and str(v).strip()
+        },
+    }
+    with open(MASTER_AKSES_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    st.cache_data.clear()
+    return True
+
+
+def verify_user_pin(role: str, person_name: str, entered_pin: str, akses_cfg: dict | None = None) -> bool:
+    cfg = akses_cfg if isinstance(akses_cfg, dict) else load_master_akses()
+    pin_in = str(entered_pin or "").strip()
+    if not pin_in:
+        return False
+
+    role_norm = str(role or "").strip().casefold()
+    p_key = str(person_name or "").strip().casefold()
+
+    if role_norm == "supervisi":
+        expected = cfg.get("supervisi_default_pin", DEFAULT_SUPERVISI_PIN)
+        for k, v in cfg.get("supervisi_pins", {}).items():
+            if str(k).strip().casefold() == p_key and str(v).strip():
+                expected = str(v).strip()
+                break
+        return hmac.compare_digest(_hash_pin(pin_in), _hash_pin(expected))
+
+    if role_norm == "spg":
+        expected = cfg.get("spg_default_pin", DEFAULT_SPG_PIN)
+        for k, v in cfg.get("spg_pins", {}).items():
+            if str(k).strip().casefold() == p_key and str(v).strip():
+                expected = str(v).strip()
+                break
+        return hmac.compare_digest(_hash_pin(pin_in), _hash_pin(expected))
+
+    return False
 
 
 def _stok_sup_key(tanggal_str: str, team_name: str, brand_name: str) -> str:
@@ -797,6 +886,7 @@ def load_supabase_backup_data():
             "harga_konsumen": read_json_file(MASTER_HARGA_FILE),
             "plat_kendaraan": read_json_file(MASTER_PLAT_FILE),
             "jadwal_detail": read_json_file(SCHEDULE_DETAIL_FILE),
+            "akses_user": read_json_file(MASTER_AKSES_FILE),
         },
     }
 
@@ -923,6 +1013,11 @@ def restore_supabase_backup(snapshot):
             file_contents[file_path] = json.dumps(
                 master_value, ensure_ascii=False, indent=2
             ).encode("utf-8")
+
+    if "akses_user" in master_data and master_data["akses_user"] is not None:
+        file_contents[MASTER_AKSES_FILE] = json.dumps(
+            master_data["akses_user"], ensure_ascii=False, indent=2
+        ).encode("utf-8")
 
     staged_files = {}
     try:
@@ -1840,7 +1935,7 @@ def style_status_target(val):
 # ====================================================
 # FUNGSI REPORT REKAPITULASI PENJUALAN & KONTROL STOK ROKOK
 # ====================================================
-def render_rekapitulasi_penjualan_report(team_name: str, target_date_str: str):
+def render_rekapitulasi_penjualan_report(team_name: str, target_date_str: str, allow_edit_stok: bool = True):
     """Menampilkan 3 komponen laporan:
     1. Rekap Penjualan 2 SPG & Kontrol Stok Rokok
     2. Breakdown Penjualan Per Nama SPG Hari Ini
@@ -1926,36 +2021,37 @@ def render_rekapitulasi_penjualan_report(team_name: str, target_date_str: str):
         f"SPG: {', '.join(tx_spg_today) if tx_spg_today else 'Belum ada penjualan'})"
     )
 
-    with st.form(f"form_input_stok_supervisi_{team_name}_{target_date_str}"):
-        st.markdown("#### 📥 Input Jumlah Stok Rokok yang Dibawa (Per Merk)")
-        st.caption(f"Tanggal: **{target_date_str}** • Team: **{team_name}**")
-        stok_input_dict = {}
-        if not brand_list_sup_stok:
-            st.info("Belum ada daftar merk rokok untuk tim ini.")
-        else:
-            for idx_b, b_name in enumerate(brand_list_sup_stok):
-                existing_stok = get_stok_awal_supervisi(target_date_str, team_name, b_name, stok_sup_map)
-                col_sb1, col_sb2 = st.columns([0.6, 0.4])
-                with col_sb1:
-                    st.markdown(f"**🚬 {b_name}**")
-                    st.caption(f"Harga konsumen: Rp {get_harga_konsumen_brand(b_name, harga_konsumen_map):,} / bks")
-                with col_sb2:
-                    stok_input_dict[b_name] = st.number_input(
-                        f"Stok dibawa {b_name}",
-                        min_value=0,
-                        step=1,
-                        value=int(existing_stok),
-                        label_visibility="collapsed",
-                        key=f"inp_stok_sup_{team_name}_{target_date_str}_{idx_b}_{b_name}",
-                    )
-        btn_save_stok_sup = st.form_submit_button("💾 Simpan Stok Dibawa Supervisi", type="primary", use_container_width=True)
-        if btn_save_stok_sup:
-            for b_name, qty_val in stok_input_dict.items():
-                k_stok = _stok_sup_key(target_date_str, team_name, b_name)
-                stok_sup_map[k_stok] = int(qty_val)
-            if save_stok_supervisi(stok_sup_map):
-                st.success("✅ Jumlah stok rokok yang dibawa Supervisi berhasil disimpan!")
-                st.rerun()
+    if allow_edit_stok:
+        with st.form(f"form_input_stok_supervisi_{team_name}_{target_date_str}"):
+            st.markdown("#### 📥 Input Jumlah Stok Rokok yang Dibawa (Per Merk)")
+            st.caption(f"Tanggal: **{target_date_str}** • Team: **{team_name}**")
+            stok_input_dict = {}
+            if not brand_list_sup_stok:
+                st.info("Belum ada daftar merk rokok untuk tim ini.")
+            else:
+                for idx_b, b_name in enumerate(brand_list_sup_stok):
+                    existing_stok = get_stok_awal_supervisi(target_date_str, team_name, b_name, stok_sup_map)
+                    col_sb1, col_sb2 = st.columns([0.6, 0.4])
+                    with col_sb1:
+                        st.markdown(f"**🚬 {b_name}**")
+                        st.caption(f"Harga konsumen: Rp {get_harga_konsumen_brand(b_name, harga_konsumen_map):,} / bks")
+                    with col_sb2:
+                        stok_input_dict[b_name] = st.number_input(
+                            f"Stok dibawa {b_name}",
+                            min_value=0,
+                            step=1,
+                            value=int(existing_stok),
+                            label_visibility="collapsed",
+                            key=f"inp_stok_sup_{team_name}_{target_date_str}_{idx_b}_{b_name}",
+                        )
+            btn_save_stok_sup = st.form_submit_button("💾 Simpan Stok Dibawa Supervisi", type="primary", use_container_width=True)
+            if btn_save_stok_sup:
+                for b_name, qty_val in stok_input_dict.items():
+                    k_stok = _stok_sup_key(target_date_str, team_name, b_name)
+                    stok_sup_map[k_stok] = int(qty_val)
+                if save_stok_supervisi(stok_sup_map):
+                    st.success("✅ Jumlah stok rokok yang dibawa Supervisi berhasil disimpan!")
+                    st.rerun()
 
     st.markdown("---")
     # --- 2. BREAKDOWN PENJUALAN PER NAMA SPG HARI INI ---
@@ -2063,6 +2159,7 @@ def reset_session_on_user_change():
     st.session_state["nama_supervisi_aktif"] = ""
     st.session_state["spg_terjadwal_list"] = []
     st.session_state["sektor_terjadwal_login"] = ""
+    st.session_state["spg_authenticated_name"] = ""
     st.session_state["draft_konsumen"] = ""
     st.session_state["draft_nohp"] = ""
     st.session_state["draft_ig"] = ""
@@ -2089,6 +2186,8 @@ if "spg_terjadwal_list" not in st.session_state:
     st.session_state["spg_terjadwal_list"] = []
 if "sektor_terjadwal_login" not in st.session_state:
     st.session_state["sektor_terjadwal_login"] = ""
+if "spg_authenticated_name" not in st.session_state:
+    st.session_state["spg_authenticated_name"] = ""
 if "login_mode" not in st.session_state:
     st.session_state["login_mode"] = "SPG"
 if "admin_logged_in" not in st.session_state:
@@ -2164,6 +2263,9 @@ if _admin_portal_requested and not st.session_state["logged_in"]:
                 st.rerun()
 
             st.markdown("##### ⚙️ Master Data")
+            if st.button("🔑 PIN & Hak Akses User", use_container_width=True, type="primary" if st.session_state["admin_view"] == "Master_Akses" else "secondary"):
+                st.session_state["admin_view"] = "Master_Akses"
+                st.rerun()
             if st.button("🏷️ Master Nama Team", use_container_width=True):
                 st.session_state["admin_view"] = "Master_Nama_Team"
                 st.rerun()
@@ -2196,6 +2298,95 @@ if _admin_portal_requested and not st.session_state["logged_in"]:
 # HALAMAN ADMIN
 # ====================================================
 if _admin_portal_requested and not st.session_state["logged_in"] and st.session_state["admin_logged_in"]:
+
+    # --- MASTER PIN & HAK AKSES USER ---
+    if st.session_state["admin_view"] == "Master_Akses":
+        st.markdown("## 🔑 Pengaturan PIN & Hak Akses SPG / Supervisi")
+        st.caption(
+            "Atur PIN login Supervisi dan SPG agar setiap peran/orang tidak saling masuk ke akun atau mengubah data milik rekan lain."
+        )
+        akses_cfg = load_master_akses()
+        spv_list_known = sorted(
+            set(
+                [s.get("supervisi", "") for s in get_scheduled_slots_for_date(None) if s.get("supervisi")]
+                + list(akses_cfg.get("supervisi_pins", {}).keys())
+            )
+        )
+        # Ambil nama supervisi dari jadwal detail jika ada
+        sched_detail_raw = _cached_read_json_no_mtime(SCHEDULE_DETAIL_FILE)
+        if isinstance(sched_detail_raw, dict):
+            for rec in sched_detail_raw.values():
+                if isinstance(rec, dict):
+                    spv_v = str(rec.get("supervisi") or "").strip()
+                    if spv_v and spv_v not in spv_list_known:
+                        spv_list_known.append(spv_v)
+                    for s_key in ("spg_1", "spg_2"):
+                        s_v = str(rec.get(s_key) or "").strip()
+                        if s_v and s_v not in load_master_spgs():
+                            pass
+        spv_list_known = sorted(set(spv_list_known))
+        spg_list_known = sorted(set(load_master_spgs() + list(akses_cfg.get("spg_pins", {}).keys())))
+
+        with st.form("form_pengaturan_akses_pin"):
+            col_pin1, col_pin2 = st.columns(2)
+            with col_pin1:
+                sup_def_pin = st.text_input(
+                    "PIN Default Supervisi",
+                    value=akses_cfg.get("supervisi_default_pin", DEFAULT_SUPERVISI_PIN),
+                    key="cfg_sup_def_pin",
+                )
+            with col_pin2:
+                spg_def_pin = st.text_input(
+                    "PIN Default SPG",
+                    value=akses_cfg.get("spg_default_pin", DEFAULT_SPG_PIN),
+                    key="cfg_spg_def_pin",
+                )
+
+            req_spg_pin = st.checkbox(
+                "Wajibkan PIN saat login SPG (mengunci nama SPG per sesi agar tidak saling mengganti nama)",
+                value=bool(akses_cfg.get("require_spg_pin", False)),
+                key="cfg_req_spg_pin",
+            )
+
+            st.markdown("---")
+            st.markdown("#### 🧑‍💼 PIN Khusus Per Nama Supervisi (Opsional)")
+            edited_sup_pins = {}
+            for idx_sp, sp_nm in enumerate(spv_list_known):
+                edited_sup_pins[sp_nm] = st.text_input(
+                    f"PIN Supervisi — {sp_nm}",
+                    value=akses_cfg.get("supervisi_pins", {}).get(sp_nm, ""),
+                    placeholder=f"Kosongkan untuk pakai PIN default ({sup_def_pin})",
+                    key=f"cfg_sup_pin_{idx_sp}_{sp_nm}",
+                )
+
+            st.markdown("---")
+            st.markdown("#### 👩‍💼 PIN Khusus Per Nama SPG (Opsional)")
+            edited_spg_pins = {}
+            for idx_sg, sg_nm in enumerate(spg_list_known):
+                edited_spg_pins[sg_nm] = st.text_input(
+                    f"PIN SPG — {sg_nm}",
+                    value=akses_cfg.get("spg_pins", {}).get(sg_nm, ""),
+                    placeholder=f"Kosongkan untuk pakai PIN default ({spg_def_pin})",
+                    key=f"cfg_spg_pin_{idx_sg}_{sg_nm}",
+                )
+
+            if st.form_submit_button("💾 Simpan Pengaturan PIN & Akses", type="primary", use_container_width=True):
+                new_cfg = {
+                    "supervisi_default_pin": sup_def_pin.strip() or DEFAULT_SUPERVISI_PIN,
+                    "spg_default_pin": spg_def_pin.strip() or DEFAULT_SPG_PIN,
+                    "require_spg_pin": req_spg_pin,
+                    "supervisi_pins": {k: v.strip() for k, v in edited_sup_pins.items() if v.strip()},
+                    "spg_pins": {k: v.strip() for k, v in edited_spg_pins.items() if v.strip()},
+                }
+                if save_master_akses(new_cfg):
+                    st.success("✅ Pengaturan PIN & hak akses berhasil disimpan!")
+                    st.rerun()
+
+        st.markdown("---")
+        if st.button("⬅️ Kembali ke Dashboard", key="btn_back_master_akses"):
+            st.session_state["admin_view"] = "Dashboard"
+            st.rerun()
+        st.stop()
 
     # --- MASTER NAMA TEAM ---
     if st.session_state["admin_view"] == "Master_Nama_Team":
@@ -3310,6 +3501,9 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
     st.markdown("#### 📦 Master Data")
     col_m1, col_m2, col_m3 = st.columns(3)
     with col_m1:
+        if st.button("🔑 PIN & Hak Akses User\nAtur PIN SPG & Supervisi", use_container_width=True):
+            st.session_state["admin_view"] = "Master_Akses"
+            st.rerun()
         if st.button("🏷️ Master Nama Team\nAtur nama team 1 - 20", use_container_width=True):
             st.session_state["admin_view"] = "Master_Nama_Team"
             st.rerun()
@@ -3639,6 +3833,7 @@ if not st.session_state["logged_in"]:
             type="primary" if st.session_state["login_mode"] == "SPG" else "secondary",
         ):
             st.session_state["login_mode"] = "SPG"
+            st.session_state["spg_authenticated_name"] = ""
             st.rerun()
 
     with col_btn_mode2:
@@ -3648,6 +3843,7 @@ if not st.session_state["logged_in"]:
             type="primary" if st.session_state["login_mode"] == "Supervisi" else "secondary",
         ):
             st.session_state["login_mode"] = "Supervisi"
+            st.session_state["spg_authenticated_name"] = ""
             st.rerun()
 
     with col_btn_mode3:
@@ -3657,6 +3853,7 @@ if not st.session_state["logged_in"]:
             type="primary" if st.session_state["login_mode"] == "Rekapitulasi" else "secondary",
         ):
             st.session_state["login_mode"] = "Rekapitulasi"
+            st.session_state["spg_authenticated_name"] = ""
             st.rerun()
 
     team_name_mapping = load_master_team_names()
@@ -3665,6 +3862,7 @@ if not st.session_state["logged_in"]:
         for i in range(1, 21)
         if team_name_mapping[f"Team SPG {i}"]
     ]
+    akses_cfg_login = load_master_akses()
 
     # Jika pengguna klik tombol Rekapitulasi Penjualan -> langsung tampilkan 3 laporan rekap & stok
     if st.session_state["login_mode"] == "Rekapitulasi":
@@ -3690,6 +3888,7 @@ if not st.session_state["logged_in"]:
         render_rekapitulasi_penjualan_report(
             team_name=pilihan_user_rek,
             target_date_str=tgl_rekap_input.strftime("%Y-%m-%d"),
+            allow_edit_stok=False,
         )
 
         st.markdown(
@@ -3702,7 +3901,7 @@ if not st.session_state["logged_in"]:
         )
         st.stop()
 
-    st.markdown('<div class="section-title">2️⃣ Pilih Tim &amp; Verifikasi Jadwal</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">2️⃣ Pilih Tim, Identitas &amp; Verifikasi Jadwal</div>', unsafe_allow_html=True)
     with st.container(border=True):
         pilihan_user = st.selectbox(
             "👤 Nama Team Operasional",
@@ -3742,6 +3941,9 @@ if not st.session_state["logged_in"]:
         spg2_names = personnel_info.get("spg_2", [])
         spg_all_names = personnel_info.get("spg_all", [])
 
+        spg_login_selected = ""
+        pin_login_input = ""
+
         if not schedule_ok:
             st.error("⚠️ **Tidak Ada Jadwal Team Tersebut Untuk Hari Ini**")
         else:
@@ -3763,6 +3965,28 @@ if not st.session_state["logged_in"]:
                 else:
                     st.error(f"Terdapat lebih dari satu plat kendaraan ({', '.join(scheduled_vehicles)}). Samakan plat pada jadwal.")
 
+                pin_login_input = st.text_input(
+                    f"🔐 PIN Supervisi ({spv_label})",
+                    type="password",
+                    placeholder="Masukkan PIN Supervisi",
+                    key="login_pin_supervisi",
+                )
+            else:
+                opsi_spg_login = spg_all_names if spg_all_names else load_master_spgs()
+                if opsi_spg_login:
+                    spg_login_selected = st.selectbox(
+                        "👩‍💼 Pilih Identitas Nama SPG Anda (Terkunci Selama Sesi)",
+                        options=opsi_spg_login,
+                        key="login_select_spg_identity",
+                    )
+                if akses_cfg_login.get("require_spg_pin", False):
+                    pin_login_input = st.text_input(
+                        f"🔐 PIN SPG ({spg_login_selected or 'SPG'})",
+                        type="password",
+                        placeholder="Masukkan PIN SPG",
+                        key="login_pin_spg",
+                    )
+
         st.markdown("")
         btn_login = st.button(f"🚀 Lanjut Masuk ({st.session_state['login_mode']})", type="primary", use_container_width=True)
 
@@ -3771,6 +3995,16 @@ if not st.session_state["logged_in"]:
                 st.error("❌ Akses ditolak: Tidak Ada Jadwal Team Tersebut Untuk Hari Ini.")
             elif st.session_state["login_mode"] == "Supervisi" and len(scheduled_vehicles) != 1:
                 st.error("❌ Akses Supervisi ditolak: plat kendaraan pada jadwal belum tersedia atau tidak konsisten.")
+            elif st.session_state["login_mode"] == "Supervisi" and not verify_user_pin(
+                "Supervisi", spv_names[0] if spv_names else pilihan_user, pin_login_input, akses_cfg_login
+            ):
+                st.error("❌ PIN Supervisi salah! Masukkan PIN yang sesuai agar data Supervisi tidak tertukar.")
+            elif (
+                st.session_state["login_mode"] == "SPG"
+                and akses_cfg_login.get("require_spg_pin", False)
+                and not verify_user_pin("SPG", spg_login_selected, pin_login_input, akses_cfg_login)
+            ):
+                st.error("❌ PIN SPG salah! Masukkan PIN SPG yang sesuai.")
             else:
                 st.session_state["logged_in"] = True
                 st.session_state["user_spg"] = pilihan_user
@@ -3779,6 +4013,7 @@ if not st.session_state["logged_in"]:
                 st.session_state["nama_supervisi_aktif"] = spv_names[0] if spv_names else ""
                 st.session_state["spg_terjadwal_list"] = spg_all_names
                 st.session_state["sektor_terjadwal_login"] = selected_sektor_login
+                st.session_state["spg_authenticated_name"] = spg_login_selected
                 st.rerun()
 
     st.markdown(
@@ -3801,11 +4036,12 @@ col_banner, col_logout = st.columns([0.8, 0.2])
 with col_banner:
     mode_badge = "👀 Supervisi" if st.session_state["login_mode"] == "Supervisi" else "📝 SPG"
     spv_aktif = st.session_state.get("nama_supervisi_aktif", "").strip()
+    spg_sesi_aktif = st.session_state.get("spg_authenticated_name", "").strip()
     spg_list_aktif = st.session_state.get("spg_terjadwal_list", [])
     personel_badge = (
         f" &nbsp;•&nbsp; 🧑‍💼 SPV: <b>{spv_aktif or '-'}</b>"
         if st.session_state["login_mode"] == "Supervisi"
-        else f" &nbsp;•&nbsp; 👩‍💼 SPG: <b>{', '.join(spg_list_aktif) if spg_list_aktif else '-'}</b>"
+        else f" &nbsp;•&nbsp; 👩‍💼 SPG Terkunci: <b>{spg_sesi_aktif or (', '.join(spg_list_aktif) if spg_list_aktif else '-')}</b>"
     )
     st.markdown(
         f"""
@@ -3825,6 +4061,7 @@ with col_logout:
     st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
     if st.button("🚪 Keluar", use_container_width=True):
         st.session_state["logged_in"] = False
+        st.session_state["spg_authenticated_name"] = ""
         st.rerun()
 
 daftar_kecamatan = get_geo_districts(st.session_state["kota_kab"]) or ["Kecamatan Default"]
@@ -4257,9 +4494,10 @@ if st.session_state["login_mode"] == "Supervisi":
     render_rekapitulasi_penjualan_report(
         team_name=st.session_state["user_spg"],
         target_date_str=today_str_sup,
+        allow_edit_stok=True,
     )
 
-    st.markdown("#### 📑 Log Detail Konsumen Beli (SPG) di Warkop Ini")
+    st.markdown("#### 📑 Log Detail Transaksi Konsumen Beli (SPG) di Warkop Ini")
     if not df_lkk_active_spg.empty:
         st.dataframe(df_lkk_active_spg.drop(columns=["Waktu", "Promotor", "Plat_Mobil"], errors="ignore"), use_container_width=True)
     else:
@@ -4268,7 +4506,7 @@ if st.session_state["login_mode"] == "Supervisi":
     st.stop()
 
 # ====================================================
-# MODE SPG (RINGKASAN ROKOK TERJUAL & ACHIEVED DI ATAS)
+# MODE SPG (IDENTITAS TERKUNCI SESI + RINGKASAN DI ATAS)
 # ====================================================
 today_wib_spg = (datetime.utcnow() + timedelta(hours=7)).date()
 today_str_spg = today_wib_spg.strftime("%Y-%m-%d")
@@ -4279,8 +4517,12 @@ personnel_spg_today = get_scheduled_personnel_for_team(
     selected_kecamatan=sektor_aktif_spg,
 )
 daftar_spg_terjadwal = personnel_spg_today.get("spg_all", []) or st.session_state.get("spg_terjadwal_list", [])
+spg_locked_session = str(st.session_state.get("spg_authenticated_name") or "").strip()
 
-if daftar_spg_terjadwal:
+if spg_locked_session:
+    nama_spg_manual = spg_locked_session
+    st.info(f"🔒 **Identitas SPG Terkunci di Sesi Ini:** **{nama_spg_manual}** (Klik **Keluar** jika ingin mengganti SPG)")
+elif daftar_spg_terjadwal:
     nama_spg_manual = st.selectbox(
         "👩‍💼 Pilih Nama SPG yang Bertugas (Sesuai Jadwal Hari Ini)",
         options=daftar_spg_terjadwal,
