@@ -2160,6 +2160,7 @@ def reset_session_on_user_change():
     st.session_state["spg_terjadwal_list"] = []
     st.session_state["sektor_terjadwal_login"] = ""
     st.session_state["spg_authenticated_name"] = ""
+    st.session_state["show_titik_lkk_spg"] = False
     st.session_state["draft_konsumen"] = ""
     st.session_state["draft_nohp"] = ""
     st.session_state["draft_ig"] = ""
@@ -2188,6 +2189,8 @@ if "sektor_terjadwal_login" not in st.session_state:
     st.session_state["sektor_terjadwal_login"] = ""
 if "spg_authenticated_name" not in st.session_state:
     st.session_state["spg_authenticated_name"] = ""
+if "show_titik_lkk_spg" not in st.session_state:
+    st.session_state["show_titik_lkk_spg"] = False
 if "login_mode" not in st.session_state:
     st.session_state["login_mode"] = "SPG"
 if "admin_logged_in" not in st.session_state:
@@ -3829,6 +3832,7 @@ if not st.session_state["logged_in"]:
         ):
             st.session_state["login_mode"] = "SPG"
             st.session_state["spg_authenticated_name"] = ""
+            st.session_state["show_titik_lkk_spg"] = False
             st.rerun()
 
     with col_btn_mode2:
@@ -4008,6 +4012,7 @@ if not st.session_state["logged_in"]:
                 st.session_state["spg_terjadwal_list"] = spg_all_names
                 st.session_state["sektor_terjadwal_login"] = selected_sektor_login
                 st.session_state["spg_authenticated_name"] = spg_login_selected
+                st.session_state["show_titik_lkk_spg"] = False
                 st.rerun()
 
     st.markdown(
@@ -4450,7 +4455,7 @@ if st.session_state["login_mode"] == "Supervisi":
     st.stop()
 
 # ====================================================
-# MODE SPG (FORM INPUT KONSUMEN DI PALING ATAS, KETERANGAN DI BAWAH)
+# MODE SPG (HEADER DI ATAS SENDIRI, FORM INPUT, TITIK LKK HIDE/UNHIDE DEFAULT HIDE)
 # ====================================================
 today_wib_spg = (datetime.utcnow() + timedelta(hours=7)).date()
 today_str_spg = today_wib_spg.strftime("%Y-%m-%d")
@@ -4484,11 +4489,39 @@ else:
 
 has_locked_lkk = locked_point_today is not None and str(nama_warkop_manual).strip() != ""
 
-# --- 1. FORM INPUT KONSUMEN (DI ATAS SENDIRI) ---
+# --- 1. HEADER TETAP DI ATAS SENDIRI ---
+col_banner, col_logout = st.columns([0.8, 0.2])
+with col_banner:
+    spg_sesi_aktif = st.session_state.get("spg_authenticated_name", "").strip()
+    spg_list_aktif = st.session_state.get("spg_terjadwal_list", [])
+    personel_badge = f" &nbsp;•&nbsp; 👩‍💼 SPG Terkunci: <b>{spg_sesi_aktif or (', '.join(spg_list_aktif) if spg_list_aktif else nama_spg_manual)}</b>"
+    st.markdown(
+        f"""
+        <div class="user-banner">
+            <div class="user-banner-title">
+                <span>👤 {st.session_state['user_spg']}</span>
+                <span class="badge-mode">📝 SPG</span>
+            </div>
+            <div class="user-banner-sub">
+                🚗 Plat: <b>{st.session_state['plat_mobil']}</b> &nbsp;•&nbsp; 🏙️ Wilayah: <b>{st.session_state['kota_kab']}</b>{personel_badge}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with col_logout:
+    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+    if st.button("🚪 Keluar", use_container_width=True):
+        st.session_state["logged_in"] = False
+        st.session_state["spg_authenticated_name"] = ""
+        st.session_state["show_titik_lkk_spg"] = False
+        st.rerun()
+
+# --- 2. FORM INPUT KONSUMEN ---
 if not has_locked_lkk:
     st.error(
         "🔒 **Form Input SPG Terkunci:** Supervisi belum memilih dan menyimpan (**Save Titik LKK**) titik lokasi LKK hari ini. "
-        "Silakan tunggu Supervisi me-lock titik LKK lalu tekan **🔄 Refresh** pada bagian keterangan di bawah."
+        "Silakan tunggu Supervisi me-lock titik LKK lalu tampilkan **📍 Titik Kunjungan Lapangan** di bawah untuk menekan **🔄 Refresh**."
     )
 elif is_inside_geofence and str(nama_spg_manual).strip() != "":
     if st.session_state.get("spg_last_saved_msg"):
@@ -4666,33 +4699,48 @@ else:
     else:
         st.info("ℹ️ Identitas SPG belum tersedia untuk membuka form.")
 
-# --- 2. KETERANGAN DI BAWAH FORM (BANNER, GPS AKTIF, TITIK LKK, TOTAL ROKOK LAKU) ---
+# --- 3. KETERANGAN DI BAWAH FORM (TITIK LKK HIDE/UNHIDE DEFAULT HIDE, GPS AKTIF, TOTAL ROKOK LAKU) ---
 st.markdown("---")
-col_banner, col_logout = st.columns([0.8, 0.2])
-with col_banner:
-    spg_sesi_aktif = st.session_state.get("spg_authenticated_name", "").strip()
-    spg_list_aktif = st.session_state.get("spg_terjadwal_list", [])
-    personel_badge = f" &nbsp;•&nbsp; 👩‍💼 SPG Terkunci: <b>{spg_sesi_aktif or (', '.join(spg_list_aktif) if spg_list_aktif else nama_spg_manual)}</b>"
-    st.markdown(
-        f"""
-        <div class="user-banner">
-            <div class="user-banner-title">
-                <span>👤 {st.session_state['user_spg']}</span>
-                <span class="badge-mode">📝 SPG</span>
-            </div>
-            <div class="user-banner-sub">
-                🚗 Plat: <b>{st.session_state['plat_mobil']}</b> &nbsp;•&nbsp; 🏙️ Wilayah: <b>{st.session_state['kota_kab']}</b>{personel_badge}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-with col_logout:
-    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
-    if st.button("🚪 Keluar", use_container_width=True):
-        st.session_state["logged_in"] = False
-        st.session_state["spg_authenticated_name"] = ""
+is_titik_lkk_shown = bool(st.session_state.get("show_titik_lkk_spg", False))
+col_lkk_hdr, col_lkk_toggle = st.columns([0.72, 0.28])
+with col_lkk_hdr:
+    st.markdown('<div class="section-title" style="margin: 6px 0;">📍 Titik Kunjungan Lapangan</div>', unsafe_allow_html=True)
+with col_lkk_toggle:
+    toggle_label = "🙈 Hide" if is_titik_lkk_shown else "👁️ Unhide"
+    if st.button(toggle_label, key="btn_toggle_titik_lkk_spg", use_container_width=True):
+        st.session_state["show_titik_lkk_spg"] = not is_titik_lkk_shown
         st.rerun()
+
+if is_titik_lkk_shown:
+    with st.container(border=True):
+        col_spg_s1, col_spg_s2 = st.columns([0.78, 0.22])
+        with col_spg_s1:
+            if locked_point_today:
+                st_lock_spg = locked_point_today.get("status_kunjungan", VISIT_STATUS_WAJIB)
+                kontak_info = (
+                    f" • Kontak Tim Tersimpan: **{latest_sup_contact['kontak']}**"
+                    if latest_sup_contact and latest_sup_contact.get("warkop", "").casefold() == locked_point_today["warkop"].casefold()
+                    else ""
+                )
+                st.success(
+                    f"🔒 **Titik LKK Terkunci (Dari Supervisi):** **{locked_point_today['warkop']}** "
+                    f"({locked_point_today['kecamatan']} • **{st_lock_spg}**){kontak_info}"
+                )
+            else:
+                st.error(
+                    "⛔ **Menunggu Supervisi Save Titik LKK.** Form input SPG belum dibuka sampai Supervisi memilih dan menyimpan (lock) titik lokasi LKK hari ini."
+                )
+        with col_spg_s2:
+            st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
+            if st.button("🔄 Refresh", key="btn_refresh_spg_sync", use_container_width=True):
+                st.rerun()
+
+        st.markdown(f"""
+        <div class="address-box">
+            📍 <b>Kecamatan:</b> {kecamatan_pilihan} &nbsp;|&nbsp; <b>Warkop / LKK:</b> {nama_warkop_manual or '(Belum di-save Supervisi)'} &nbsp;|&nbsp; <b>Status:</b> {status_warkop_terpilih}<br/>
+            🏠 <b>Alamat:</b> {alamat_warkop_terpilih}
+        </div>
+        """, unsafe_allow_html=True)
 
 if is_inside_geofence:
     st.success(
@@ -4703,37 +4751,6 @@ else:
         f"⚠️ **Info GPS:** Posisi Anda terdeteksi di luar poligon zona "
         f"{st.session_state['kota_kab']} (Lat: `{user_lat:.6f}`, Lon: `{user_lon:.6f}`)."
     )
-
-st.markdown('<div class="section-title">📍 Titik Kunjungan Lapangan</div>', unsafe_allow_html=True)
-with st.container(border=True):
-    col_spg_s1, col_spg_s2 = st.columns([0.78, 0.22])
-    with col_spg_s1:
-        if locked_point_today:
-            st_lock_spg = locked_point_today.get("status_kunjungan", VISIT_STATUS_WAJIB)
-            kontak_info = (
-                f" • Kontak Tim Tersimpan: **{latest_sup_contact['kontak']}**"
-                if latest_sup_contact and latest_sup_contact.get("warkop", "").casefold() == locked_point_today["warkop"].casefold()
-                else ""
-            )
-            st.success(
-                f"🔒 **Titik LKK Terkunci (Dari Supervisi):** **{locked_point_today['warkop']}** "
-                f"({locked_point_today['kecamatan']} • **{st_lock_spg}**){kontak_info}"
-            )
-        else:
-            st.error(
-                "⛔ **Menunggu Supervisi Save Titik LKK.** Form input SPG belum dibuka sampai Supervisi memilih dan menyimpan (lock) titik lokasi LKK hari ini."
-            )
-    with col_spg_s2:
-        st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
-        if st.button("🔄 Refresh", key="btn_refresh_spg_sync", use_container_width=True):
-            st.rerun()
-
-    st.markdown(f"""
-    <div class="address-box">
-        📍 <b>Kecamatan:</b> {kecamatan_pilihan} &nbsp;|&nbsp; <b>Warkop / LKK:</b> {nama_warkop_manual or '(Belum di-save Supervisi)'} &nbsp;|&nbsp; <b>Status:</b> {status_warkop_terpilih}<br/>
-        🏠 <b>Alamat:</b> {alamat_warkop_terpilih}
-    </div>
-    """, unsafe_allow_html=True)
 
 df_db_spg_top = load_database()
 spg_active_clean = str(nama_spg_manual or "").strip()
@@ -4791,7 +4808,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# --- 3. EVALUASI HARIAN & LOG REKAP ---
+# --- 4. EVALUASI HARIAN & LOG REKAP ---
 st.markdown("---")
 st.markdown(f"### 📈 Evaluasi Harian & Log Rekap: {st.session_state['user_spg']} ({st.session_state['kota_kab']})")
 
