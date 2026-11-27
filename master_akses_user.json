@@ -1,0 +1,15 @@
+{
+  "supervisi_default_pin": "1111",
+  "spg_default_pin": "0000",
+  "require_spg_pin": false,
+  "supervisi_pins": {
+    "Adi": "5101",
+    "Adit": "5102",
+    "Adi": "5101",
+    
+  },
+  "spg_pins": {
+    "Nanda": "7101",
+    "Siska": "7102"
+  }
+}
