@@ -2312,7 +2312,6 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
                 + list(akses_cfg.get("supervisi_pins", {}).keys())
             )
         )
-        # Ambil nama supervisi dari jadwal detail jika ada
         sched_detail_raw = _cached_read_json_no_mtime(SCHEDULE_DETAIL_FILE)
         if isinstance(sched_detail_raw, dict):
             for rec in sched_detail_raw.values():
@@ -2320,10 +2319,6 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
                     spv_v = str(rec.get("supervisi") or "").strip()
                     if spv_v and spv_v not in spv_list_known:
                         spv_list_known.append(spv_v)
-                    for s_key in ("spg_1", "spg_2"):
-                        s_v = str(rec.get(s_key) or "").strip()
-                        if s_v and s_v not in load_master_spgs():
-                            pass
         spv_list_known = sorted(set(spv_list_known))
         spg_list_known = sorted(set(load_master_spgs() + list(akses_cfg.get("spg_pins", {}).keys())))
 
@@ -3864,7 +3859,6 @@ if not st.session_state["logged_in"]:
     ]
     akses_cfg_login = load_master_akses()
 
-    # Jika pengguna klik tombol Rekapitulasi Penjualan -> langsung tampilkan 3 laporan rekap & stok
     if st.session_state["login_mode"] == "Rekapitulasi":
         st.markdown('<div class="section-title">2️⃣ Pilih Tim &amp; Tanggal Rekapitulasi</div>', unsafe_allow_html=True)
         with st.container(border=True):
@@ -4031,42 +4025,8 @@ if not st.session_state["logged_in"]:
 # ====================================================
 apply_team_theme_css(st.session_state["user_spg"])
 
-col_banner, col_logout = st.columns([0.8, 0.2])
-
-with col_banner:
-    mode_badge = "👀 Supervisi" if st.session_state["login_mode"] == "Supervisi" else "📝 SPG"
-    spv_aktif = st.session_state.get("nama_supervisi_aktif", "").strip()
-    spg_sesi_aktif = st.session_state.get("spg_authenticated_name", "").strip()
-    spg_list_aktif = st.session_state.get("spg_terjadwal_list", [])
-    personel_badge = (
-        f" &nbsp;•&nbsp; 🧑‍💼 SPV: <b>{spv_aktif or '-'}</b>"
-        if st.session_state["login_mode"] == "Supervisi"
-        else f" &nbsp;•&nbsp; 👩‍💼 SPG Terkunci: <b>{spg_sesi_aktif or (', '.join(spg_list_aktif) if spg_list_aktif else '-')}</b>"
-    )
-    st.markdown(
-        f"""
-        <div class="user-banner">
-            <div class="user-banner-title">
-                <span>👤 {st.session_state['user_spg']}</span>
-                <span class="badge-mode">{mode_badge}</span>
-            </div>
-            <div class="user-banner-sub">
-                🚗 Plat: <b>{st.session_state['plat_mobil']}</b> &nbsp;•&nbsp; 🏙️ Wilayah: <b>{st.session_state['kota_kab']}</b>{personel_badge}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-with col_logout:
-    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
-    if st.button("🚪 Keluar", use_container_width=True):
-        st.session_state["logged_in"] = False
-        st.session_state["spg_authenticated_name"] = ""
-        st.rerun()
-
+# --- GPS & GEOFENCING ---
 daftar_kecamatan = get_geo_districts(st.session_state["kota_kab"]) or ["Kecamatan Default"]
-
-# GPS
 loc = get_geolocation()
 detected_kecamatan = None
 
@@ -4114,57 +4074,78 @@ else:
 
 is_inside_geofence = True
 
-if is_inside_geofence:
-    st.success(
-        f"📍 **GPS Aktif:** `{user_lat:.6f}`, `{user_lon:.6f}` (±{akurasi_meter}m) — **{st.session_state['kota_kab']}**"
-    )
-else:
-    st.warning(
-        f"⚠️ **Info GPS:** Posisi Anda terdeteksi di luar poligon zona "
-        f"{st.session_state['kota_kab']} (Lat: `{user_lat:.6f}`, Lon: `{user_lon:.6f}`)."
-    )
-
-# ====================================================
-# VALIDASI JADWAL SPG DARI EXCEL
-# ====================================================
+# --- JADWAL & TITIK KUNJUNGAN TERKUNCI ---
 schedule_ok, _, _, daftar_kecamatan_terjadwal, _ = get_schedule_info_for_team(st.session_state["user_spg"])
-
 if not schedule_ok:
     daftar_kecamatan_terjadwal = daftar_kecamatan if daftar_kecamatan else ["Kecamatan Umum"]
 else:
     daftar_kecamatan_terjadwal = sorted(set(daftar_kecamatan_terjadwal))
 
-# ====================================================
-# TITIK KUNJUNGAN LAPANGAN (LOCK TITIK LKK OLEH SUPERVISI)
-# ====================================================
-st.markdown('<div class="section-title">📍 Titik Kunjungan Lapangan</div>', unsafe_allow_html=True)
-with st.container(border=True):
-    df_sup_today_all = load_supervisi_database()
-    locked_point_today = get_active_locked_lkk_point_today(
-        team_name=st.session_state["user_spg"],
-        fallback_kota=st.session_state.get("kota_kab", ""),
-    )
-    latest_sup_contact = get_latest_supervisi_point_today(
-        team_name=st.session_state["user_spg"],
-        fallback_kota=st.session_state.get("kota_kab", ""),
-        df_sup=df_sup_today_all,
-    )
+df_sup_today_all = load_supervisi_database()
+locked_point_today = get_active_locked_lkk_point_today(
+    team_name=st.session_state["user_spg"],
+    fallback_kota=st.session_state.get("kota_kab", ""),
+)
+latest_sup_contact = get_latest_supervisi_point_today(
+    team_name=st.session_state["user_spg"],
+    fallback_kota=st.session_state.get("kota_kab", ""),
+    df_sup=df_sup_today_all,
+)
 
-    df_master_excel = load_master_lokasi_excel()
-    col_kec_excel = next(
-        (c for c in df_master_excel.columns if "kec" in c.lower() or "wilayah" in c.lower()),
-        None,
-    ) if not df_master_excel.empty else None
-    col_warkop_excel = next(
-        (c for c in df_master_excel.columns if "warkop" in c.lower() or "lkk" in c.lower() or "nama" in c.lower()),
-        None,
-    ) if not df_master_excel.empty else None
-    col_alamat_excel = next(
-        (c for c in df_master_excel.columns if "alamat" in c.lower() or "address" in c.lower()),
-        None,
-    ) if not df_master_excel.empty else None
+df_master_excel = load_master_lokasi_excel()
+col_kec_excel = next(
+    (c for c in df_master_excel.columns if "kec" in c.lower() or "wilayah" in c.lower()),
+    None,
+) if not df_master_excel.empty else None
+col_warkop_excel = next(
+    (c for c in df_master_excel.columns if "warkop" in c.lower() or "lkk" in c.lower() or "nama" in c.lower()),
+    None,
+) if not df_master_excel.empty else None
+col_alamat_excel = next(
+    (c for c in df_master_excel.columns if "alamat" in c.lower() or "address" in c.lower()),
+    None,
+) if not df_master_excel.empty else None
 
-    if st.session_state["login_mode"] == "Supervisi":
+# ====================================================
+# MODE SUPERVISI (2 MENU SAVE: SAVE TITIK LKK & SAVE JUMLAH KONTAK)
+# ====================================================
+if st.session_state["login_mode"] == "Supervisi":
+    col_banner, col_logout = st.columns([0.8, 0.2])
+    with col_banner:
+        spv_aktif = st.session_state.get("nama_supervisi_aktif", "").strip()
+        st.markdown(
+            f"""
+            <div class="user-banner">
+                <div class="user-banner-title">
+                    <span>👤 {st.session_state['user_spg']}</span>
+                    <span class="badge-mode">👀 Supervisi</span>
+                </div>
+                <div class="user-banner-sub">
+                    🚗 Plat: <b>{st.session_state['plat_mobil']}</b> &nbsp;•&nbsp; 🏙️ Wilayah: <b>{st.session_state['kota_kab']}</b> &nbsp;•&nbsp; 🧑‍💼 SPV: <b>{spv_aktif or '-'}</b>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with col_logout:
+        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+        if st.button("🚪 Keluar", use_container_width=True):
+            st.session_state["logged_in"] = False
+            st.session_state["spg_authenticated_name"] = ""
+            st.rerun()
+
+    if is_inside_geofence:
+        st.success(
+            f"📍 **GPS Aktif:** `{user_lat:.6f}`, `{user_lon:.6f}` (±{akurasi_meter}m) — **{st.session_state['kota_kab']}**"
+        )
+    else:
+        st.warning(
+            f"⚠️ **Info GPS:** Posisi Anda terdeteksi di luar poligon zona "
+            f"{st.session_state['kota_kab']} (Lat: `{user_lat:.6f}`, Lon: `{user_lon:.6f}`)."
+        )
+
+    st.markdown('<div class="section-title">📍 Titik Kunjungan Lapangan</div>', unsafe_allow_html=True)
+    with st.container(border=True):
         col_sync_1, col_sync_2 = st.columns([0.78, 0.22])
         status_map_sup = load_warkop_visit_status_map()
         with col_sync_1:
@@ -4264,51 +4245,14 @@ with st.container(border=True):
                     "SPG kini dapat menginput laporan di titik ini."
                 )
                 st.rerun()
-    else:
-        col_spg_s1, col_spg_s2 = st.columns([0.78, 0.22])
-        with col_spg_s1:
-            if locked_point_today:
-                st_lock_spg = locked_point_today.get("status_kunjungan", VISIT_STATUS_WAJIB)
-                kontak_info = (
-                    f" • Kontak Tim Tersimpan: **{latest_sup_contact['kontak']}**"
-                    if latest_sup_contact and latest_sup_contact.get("warkop", "").casefold() == locked_point_today["warkop"].casefold()
-                    else ""
-                )
-                st.success(
-                    f"🔒 **Titik LKK Terkunci (Dari Supervisi):** **{locked_point_today['warkop']}** "
-                    f"({locked_point_today['kecamatan']} • **{st_lock_spg}**){kontak_info}"
-                )
-            else:
-                st.error(
-                    "⛔ **Menunggu Supervisi Save Titik LKK.** Form input SPG belum dibuka sampai Supervisi memilih dan menyimpan (lock) titik lokasi LKK hari ini."
-                )
-        with col_spg_s2:
-            st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
-            if st.button("🔄 Refresh", key="btn_refresh_spg_sync", use_container_width=True):
-                st.rerun()
 
-        if locked_point_today:
-            kecamatan_pilihan = locked_point_today["kecamatan"] or "-"
-            nama_warkop_manual = locked_point_today["warkop"]
-            alamat_warkop_terpilih = locked_point_today["alamat"]
-            status_warkop_terpilih = locked_point_today.get("status_kunjungan", VISIT_STATUS_WAJIB)
-        else:
-            kecamatan_pilihan = "-"
-            nama_warkop_manual = ""
-            alamat_warkop_terpilih = "-"
-            status_warkop_terpilih = "-"
+        st.markdown(f"""
+        <div class="address-box">
+            📍 <b>Kecamatan:</b> {kecamatan_pilihan} &nbsp;|&nbsp; <b>Warkop / LKK:</b> {nama_warkop_manual or '(Belum di-save Supervisi)'} &nbsp;|&nbsp; <b>Status:</b> {status_warkop_terpilih}<br/>
+            🏠 <b>Alamat:</b> {alamat_warkop_terpilih}
+        </div>
+        """, unsafe_allow_html=True)
 
-    st.markdown(f"""
-    <div class="address-box">
-        📍 <b>Kecamatan:</b> {kecamatan_pilihan} &nbsp;|&nbsp; <b>Warkop / LKK:</b> {nama_warkop_manual or '(Belum di-save Supervisi)'} &nbsp;|&nbsp; <b>Status:</b> {status_warkop_terpilih}<br/>
-        🏠 <b>Alamat:</b> {alamat_warkop_terpilih}
-    </div>
-    """, unsafe_allow_html=True)
-
-# ====================================================
-# MODE SUPERVISI (2 MENU SAVE: SAVE TITIK LKK & SAVE JUMLAH KONTAK)
-# ====================================================
-if st.session_state["login_mode"] == "Supervisi":
     st.markdown("---")
     st.markdown(f"### 👀 Dashboard Monitoring & Entry Supervisi: {st.session_state['user_spg']} (Plat Mobil: `{st.session_state['plat_mobil']}`)")
     st.caption("Alur 2 Save: (1) Save Titik LKK untuk membuka input SPG, lalu setelah SPG selesai jualan (2) Save Jumlah Kontak Konsumen Tim.")
@@ -4506,7 +4450,7 @@ if st.session_state["login_mode"] == "Supervisi":
     st.stop()
 
 # ====================================================
-# MODE SPG (IDENTITAS TERKUNCI SESI + RINGKASAN DI ATAS)
+# MODE SPG (FORM INPUT KONSUMEN DI PALING ATAS, KETERANGAN DI BAWAH)
 # ====================================================
 today_wib_spg = (datetime.utcnow() + timedelta(hours=7)).date()
 today_str_spg = today_wib_spg.strftime("%Y-%m-%d")
@@ -4521,95 +4465,32 @@ spg_locked_session = str(st.session_state.get("spg_authenticated_name") or "").s
 
 if spg_locked_session:
     nama_spg_manual = spg_locked_session
-    st.info(f"🔒 **Identitas SPG Terkunci di Sesi Ini:** **{nama_spg_manual}** (Klik **Keluar** jika ingin mengganti SPG)")
 elif daftar_spg_terjadwal:
-    nama_spg_manual = st.selectbox(
-        "👩‍💼 Pilih Nama SPG yang Bertugas (Sesuai Jadwal Hari Ini)",
-        options=daftar_spg_terjadwal,
-        key="spg_active_name_selector",
-        help="Menampilkan SPG 1 & SPG 2 yang terjadwal untuk team dan sektor ini.",
-    )
+    nama_spg_manual = daftar_spg_terjadwal[0]
 else:
     daftar_master_spg = load_master_spgs()
-    if daftar_master_spg:
-        nama_spg_manual = st.selectbox(
-            "👩‍💼 Pilih Nama SPG yang Bertugas",
-            options=daftar_master_spg,
-            key="spg_active_name_selector",
-        )
-    else:
-        nama_spg_manual = st.text_input(
-            "👩‍💼 Nama SPG (Entry Manual)",
-            placeholder="Contoh: Nanda",
-            key="spg_active_name_selector",
-        )
+    nama_spg_manual = daftar_master_spg[0] if daftar_master_spg else "SPG"
 
-df_db_spg_top = load_database()
-spg_active_clean = str(nama_spg_manual or "").strip()
-team_active_clean = str(st.session_state["user_spg"] or "").strip()
-
-total_laku_spg_today = 0
-total_laku_team_today = 0
-brands_spg_today = []
-
-if not df_db_spg_top.empty and "Promotor" in df_db_spg_top.columns:
-    df_db_spg_top["Jumlah_Bungkus"] = pd.to_numeric(df_db_spg_top["Jumlah_Bungkus"], errors="coerce").fillna(0)
-    mask_team_today = (
-        (df_db_spg_top["Promotor"].astype(str).str.strip().str.casefold() == team_active_clean.casefold())
-        & (df_db_spg_top["Waktu"].astype(str).str.startswith(today_str_spg))
-    )
-    df_team_today_top = df_db_spg_top[mask_team_today]
-    total_laku_team_today = int(df_team_today_top["Jumlah_Bungkus"].sum())
-
-    if spg_active_clean:
-        df_spg_today_top = df_team_today_top[
-            df_team_today_top["Nama_SPG"].astype(str).str.strip().str.casefold() == spg_active_clean.casefold()
-        ]
-        total_laku_spg_today = int(df_spg_today_top["Jumlah_Bungkus"].sum())
-        brands_spg_today = df_spg_today_top["Brand_Rokok"].dropna().astype(str).unique().tolist()
-
-brands_for_target = personnel_spg_today.get("brands", []) or brands_spg_today
-if brands_for_target:
-    target_spg_today = max(int(get_target_for_brand(b, "target_spg", 30)) for b in brands_for_target)
+if locked_point_today:
+    kecamatan_pilihan = locked_point_today["kecamatan"] or "-"
+    nama_warkop_manual = locked_point_today["warkop"]
+    alamat_warkop_terpilih = locked_point_today["alamat"]
+    status_warkop_terpilih = locked_point_today.get("status_kunjungan", VISIT_STATUS_WAJIB)
 else:
-    target_spg_today = 30
-
-is_achieved_today = total_laku_spg_today >= target_spg_today
-kurang_target_today = max(0, target_spg_today - total_laku_spg_today)
-status_badge_spg = (
-    '<span style="background:#DCFCE7;color:#15803D;padding:5px 14px;border-radius:999px;font-weight:700;font-size:0.88rem;">✅ ACHIEVED</span>'
-    if is_achieved_today
-    else f'<span style="background:#FEE2E2;color:#B91C1C;padding:5px 14px;border-radius:999px;font-weight:700;font-size:0.88rem;">⏳ BELUM ACHIEVED (Kurang {kurang_target_today} bks)</span>'
-)
-
-st.markdown(
-    f"""
-    <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:12px;padding:14px 18px;margin:10px 0 14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
-            <div>
-                <div style="font-size:0.82rem;color:#64748B;font-weight:600;">🚬 TOTAL ROKOK LAKU TERJUAL HARI INI ({spg_active_clean or 'SPG'})</div>
-                <div style="font-size:1.7rem;font-weight:800;color:#0F172A;line-height:1.2;">
-                    {total_laku_spg_today:,} <span style="font-size:0.95rem;font-weight:600;color:#475569;">/ {target_spg_today:,} bungkus</span>
-                </div>
-                <div style="font-size:0.8rem;color:#64748B;margin-top:2px;">Total terjual tim hari ini (2 SPG): <b>{total_laku_team_today:,} bungkus</b></div>
-            </div>
-            <div>{status_badge_spg}</div>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+    kecamatan_pilihan = "-"
+    nama_warkop_manual = ""
+    alamat_warkop_terpilih = "-"
+    status_warkop_terpilih = "-"
 
 has_locked_lkk = locked_point_today is not None and str(nama_warkop_manual).strip() != ""
 
+# --- 1. FORM INPUT KONSUMEN (DI ATAS SENDIRI) ---
 if not has_locked_lkk:
     st.error(
         "🔒 **Form Input SPG Terkunci:** Supervisi belum memilih dan menyimpan (**Save Titik LKK**) titik lokasi LKK hari ini. "
-        "Silakan tunggu Supervisi me-lock titik LKK lalu tekan **🔄 Refresh**."
+        "Silakan tunggu Supervisi me-lock titik LKK lalu tekan **🔄 Refresh** pada bagian keterangan di bawah."
     )
 elif is_inside_geofence and str(nama_spg_manual).strip() != "":
-    st.success(f"✅ Form terbuka untuk **{str(nama_spg_manual).strip()}** pada titik terkunci **{nama_warkop_manual}**")
-
     if st.session_state.get("spg_last_saved_msg"):
         st.balloons()
         st.success(st.session_state.pop("spg_last_saved_msg"))
@@ -4617,7 +4498,10 @@ elif is_inside_geofence and str(nama_spg_manual).strip() != "":
     spg_nonce = st.session_state.get("spg_form_nonce", 0)
     with st.form(f"form_laporan_spg_{spg_nonce}"):
         st.markdown("### 📝 Form Input Laporan Konsumen")
-        st.caption(f"Team: **{st.session_state['user_spg']}** • SPG: **{str(nama_spg_manual).strip()}** • Titik Terkunci: **{str(nama_warkop_manual).strip()}**")
+        st.caption(
+            f"Team: **{st.session_state['user_spg']}** • SPG: **{str(nama_spg_manual).strip()}** • "
+            f"Titik Terkunci: **{str(nama_warkop_manual).strip()}**"
+        )
 
         all_master_brands = load_master_brands()
         team_brands_map = load_master_team_brands()
@@ -4780,8 +4664,134 @@ else:
     if not is_inside_geofence:
         st.warning(f"🔒 Form input terkunci karena posisi GPS Anda berada di luar wilayah {st.session_state['kota_kab']}.")
     else:
-        st.info("ℹ️ Silakan pilih **Nama SPG** untuk membuka form.")
+        st.info("ℹ️ Identitas SPG belum tersedia untuk membuka form.")
 
+# --- 2. KETERANGAN DI BAWAH FORM (BANNER, GPS AKTIF, TITIK LKK, TOTAL ROKOK LAKU) ---
+st.markdown("---")
+col_banner, col_logout = st.columns([0.8, 0.2])
+with col_banner:
+    spg_sesi_aktif = st.session_state.get("spg_authenticated_name", "").strip()
+    spg_list_aktif = st.session_state.get("spg_terjadwal_list", [])
+    personel_badge = f" &nbsp;•&nbsp; 👩‍💼 SPG Terkunci: <b>{spg_sesi_aktif or (', '.join(spg_list_aktif) if spg_list_aktif else nama_spg_manual)}</b>"
+    st.markdown(
+        f"""
+        <div class="user-banner">
+            <div class="user-banner-title">
+                <span>👤 {st.session_state['user_spg']}</span>
+                <span class="badge-mode">📝 SPG</span>
+            </div>
+            <div class="user-banner-sub">
+                🚗 Plat: <b>{st.session_state['plat_mobil']}</b> &nbsp;•&nbsp; 🏙️ Wilayah: <b>{st.session_state['kota_kab']}</b>{personel_badge}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with col_logout:
+    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+    if st.button("🚪 Keluar", use_container_width=True):
+        st.session_state["logged_in"] = False
+        st.session_state["spg_authenticated_name"] = ""
+        st.rerun()
+
+if is_inside_geofence:
+    st.success(
+        f"📍 **GPS Aktif:** `{user_lat:.6f}`, `{user_lon:.6f}` (±{akurasi_meter}m) — **{st.session_state['kota_kab']}**"
+    )
+else:
+    st.warning(
+        f"⚠️ **Info GPS:** Posisi Anda terdeteksi di luar poligon zona "
+        f"{st.session_state['kota_kab']} (Lat: `{user_lat:.6f}`, Lon: `{user_lon:.6f}`)."
+    )
+
+st.markdown('<div class="section-title">📍 Titik Kunjungan Lapangan</div>', unsafe_allow_html=True)
+with st.container(border=True):
+    col_spg_s1, col_spg_s2 = st.columns([0.78, 0.22])
+    with col_spg_s1:
+        if locked_point_today:
+            st_lock_spg = locked_point_today.get("status_kunjungan", VISIT_STATUS_WAJIB)
+            kontak_info = (
+                f" • Kontak Tim Tersimpan: **{latest_sup_contact['kontak']}**"
+                if latest_sup_contact and latest_sup_contact.get("warkop", "").casefold() == locked_point_today["warkop"].casefold()
+                else ""
+            )
+            st.success(
+                f"🔒 **Titik LKK Terkunci (Dari Supervisi):** **{locked_point_today['warkop']}** "
+                f"({locked_point_today['kecamatan']} • **{st_lock_spg}**){kontak_info}"
+            )
+        else:
+            st.error(
+                "⛔ **Menunggu Supervisi Save Titik LKK.** Form input SPG belum dibuka sampai Supervisi memilih dan menyimpan (lock) titik lokasi LKK hari ini."
+            )
+    with col_spg_s2:
+        st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
+        if st.button("🔄 Refresh", key="btn_refresh_spg_sync", use_container_width=True):
+            st.rerun()
+
+    st.markdown(f"""
+    <div class="address-box">
+        📍 <b>Kecamatan:</b> {kecamatan_pilihan} &nbsp;|&nbsp; <b>Warkop / LKK:</b> {nama_warkop_manual or '(Belum di-save Supervisi)'} &nbsp;|&nbsp; <b>Status:</b> {status_warkop_terpilih}<br/>
+        🏠 <b>Alamat:</b> {alamat_warkop_terpilih}
+    </div>
+    """, unsafe_allow_html=True)
+
+df_db_spg_top = load_database()
+spg_active_clean = str(nama_spg_manual or "").strip()
+team_active_clean = str(st.session_state["user_spg"] or "").strip()
+
+total_laku_spg_today = 0
+total_laku_team_today = 0
+brands_spg_today = []
+
+if not df_db_spg_top.empty and "Promotor" in df_db_spg_top.columns:
+    df_db_spg_top["Jumlah_Bungkus"] = pd.to_numeric(df_db_spg_top["Jumlah_Bungkus"], errors="coerce").fillna(0)
+    mask_team_today = (
+        (df_db_spg_top["Promotor"].astype(str).str.strip().str.casefold() == team_active_clean.casefold())
+        & (df_db_spg_top["Waktu"].astype(str).str.startswith(today_str_spg))
+    )
+    df_team_today_top = df_db_spg_top[mask_team_today]
+    total_laku_team_today = int(df_team_today_top["Jumlah_Bungkus"].sum())
+
+    if spg_active_clean:
+        df_spg_today_top = df_team_today_top[
+            df_team_today_top["Nama_SPG"].astype(str).str.strip().str.casefold() == spg_active_clean.casefold()
+        ]
+        total_laku_spg_today = int(df_spg_today_top["Jumlah_Bungkus"].sum())
+        brands_spg_today = df_spg_today_top["Brand_Rokok"].dropna().astype(str).unique().tolist()
+
+brands_for_target = personnel_spg_today.get("brands", []) or brands_spg_today
+if brands_for_target:
+    target_spg_today = max(int(get_target_for_brand(b, "target_spg", 30)) for b in brands_for_target)
+else:
+    target_spg_today = 30
+
+is_achieved_today = total_laku_spg_today >= target_spg_today
+kurang_target_today = max(0, target_spg_today - total_laku_spg_today)
+status_badge_spg = (
+    '<span style="background:#DCFCE7;color:#15803D;padding:5px 14px;border-radius:999px;font-weight:700;font-size:0.88rem;">✅ ACHIEVED</span>'
+    if is_achieved_today
+    else f'<span style="background:#FEE2E2;color:#B91C1C;padding:5px 14px;border-radius:999px;font-weight:700;font-size:0.88rem;">⏳ BELUM ACHIEVED (Kurang {kurang_target_today} bks)</span>'
+)
+
+st.markdown(
+    f"""
+    <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:12px;padding:14px 18px;margin:10px 0 14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+            <div>
+                <div style="font-size:0.82rem;color:#64748B;font-weight:600;">🚬 TOTAL ROKOK LAKU TERJUAL HARI INI ({spg_active_clean or 'SPG'})</div>
+                <div style="font-size:1.7rem;font-weight:800;color:#0F172A;line-height:1.2;">
+                    {total_laku_spg_today:,} <span style="font-size:0.95rem;font-weight:600;color:#475569;">/ {target_spg_today:,} bungkus</span>
+                </div>
+                <div style="font-size:0.8rem;color:#64748B;margin-top:2px;">Total terjual tim hari ini (2 SPG): <b>{total_laku_team_today:,} bungkus</b></div>
+            </div>
+            <div>{status_badge_spg}</div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# --- 3. EVALUASI HARIAN & LOG REKAP ---
 st.markdown("---")
 st.markdown(f"### 📈 Evaluasi Harian & Log Rekap: {st.session_state['user_spg']} ({st.session_state['kota_kab']})")
 
