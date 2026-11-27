@@ -410,6 +410,43 @@ DB_SUPERVISI_KONTAK_FILE = "rekap_kontak_supervisi.csv"
 MASTER_BRAND_FILE = "master_brand_rokok.json"
 MASTER_TARGET_FILE = "master_target_brand.json"
 MASTER_HARGA_FILE = "master_harga_konsumen.json"
+STOK_SUPERVISI_FILE = "stok_rokok_supervisi.json"
+
+
+def _stok_sup_key(tanggal_str: str, team_name: str, brand_name: str) -> str:
+    return "|".join([
+        str(tanggal_str or "").strip(),
+        str(team_name or "").strip().casefold(),
+        str(brand_name or "").strip().casefold(),
+    ])
+
+
+def load_stok_supervisi() -> dict:
+    data = _cached_read_json_no_mtime(STOK_SUPERVISI_FILE)
+    return data if isinstance(data, dict) else {}
+
+
+def save_stok_supervisi(stok_map: dict) -> bool:
+    cleaned = {}
+    for k, v in (stok_map or {}).items():
+        try:
+            cleaned[str(k)] = max(0, int(float(v)))
+        except (ValueError, TypeError):
+            cleaned[str(k)] = 0
+    with open(STOK_SUPERVISI_FILE, "w", encoding="utf-8") as f:
+        json.dump(cleaned, f, ensure_ascii=False, indent=2)
+    st.cache_data.clear()
+    return True
+
+
+def get_stok_awal_supervisi(tanggal_str: str, team_name: str, brand_name: str, stok_map: dict | None = None) -> int:
+    smap = stok_map if isinstance(stok_map, dict) else load_stok_supervisi()
+    key = _stok_sup_key(tanggal_str, team_name, brand_name)
+    val = smap.get(key, 0)
+    try:
+        return max(0, int(float(val)))
+    except (ValueError, TypeError):
+        return 0
 
 DEFAULT_HARGA_KONSUMEN = {
     "Black Matcha K12": 22000,
@@ -4259,6 +4296,174 @@ if st.session_state["login_mode"] == "Supervisi":
         st.dataframe(df_combine_rekap, use_container_width=True)
     else:
         st.info("Titik LKK akan tampil di rekap setelah Supervisi menginput jumlah kontak.")
+
+    st.markdown("---")
+    st.markdown(f"### 📦 Rekap Penjualan 2 SPG & Kontrol Stok Rokok ({st.session_state['user_spg']})")
+    st.caption(
+        "Breakdown penjualan per nama SPG hari ini, input jumlah stok rokok yang dibawa oleh Supervisi, "
+        "dan perhitungan otomatis sisa stok setelah dikurangi penjualan SPG."
+    )
+
+    all_brands_sup = load_master_brands()
+    team_brands_sup_map = load_master_team_brands()
+    team_names_sup_map = load_master_team_names()
+    allowed_brands_sup = resolve_team_allowed_brands(
+        team_name=st.session_state["user_spg"],
+        all_brands=all_brands_sup,
+        team_brands_map=team_brands_sup_map,
+        team_names_map=team_names_sup_map,
+        prefer_keyword_match=True,
+    )
+    if not allowed_brands_sup:
+        allowed_brands_sup = all_brands_sup
+
+    sold_brands_today = (
+        df_team_spg_today["Brand_Rokok"].dropna().astype(str).str.strip().unique().tolist()
+        if not df_team_spg_today.empty
+        else []
+    )
+    brand_list_sup_stok = list(
+        dict.fromkeys([b for b in allowed_brands_sup if b] + [b for b in sold_brands_today if b])
+    )
+
+    sched_spg_today = get_scheduled_personnel_for_team(
+        st.session_state["user_spg"],
+        (datetime.utcnow() + timedelta(hours=7)).date(),
+        selected_kecamatan=locked_point_today["kecamatan"] if locked_point_today else st.session_state.get("sektor_terjadwal_login", ""),
+    ).get("spg_all", [])
+    tx_spg_today = (
+        df_team_spg_today["Nama_SPG"].dropna().astype(str).str.strip().unique().tolist()
+        if not df_team_spg_today.empty
+        else []
+    )
+    spg_2_list = list(dict.fromkeys([s for s in sched_spg_today if s] + [s for s in tx_spg_today if s]))
+    if not spg_2_list:
+        spg_2_list = ["SPG 1", "SPG 2"]
+
+    stok_sup_map = load_stok_supervisi()
+
+    with st.form("form_input_stok_supervisi_hari_ini"):
+        st.markdown("#### 📥 Input Jumlah Stok Rokok yang Dibawa (Per Merk)")
+        st.caption(f"Tanggal: **{today_str_sup}** • Team: **{st.session_state['user_spg']}**")
+        stok_input_dict = {}
+        if not brand_list_sup_stok:
+            st.info("Belum ada daftar merk rokok untuk tim ini.")
+        else:
+            for idx_b, b_name in enumerate(brand_list_sup_stok):
+                existing_stok = get_stok_awal_supervisi(today_str_sup, st.session_state["user_spg"], b_name, stok_sup_map)
+                col_sb1, col_sb2 = st.columns([0.6, 0.4])
+                with col_sb1:
+                    st.markdown(f"**🚬 {b_name}**")
+                    st.caption(f"Harga konsumen: Rp {get_harga_konsumen_brand(b_name, harga_konsumen_map):,} / bks")
+                with col_sb2:
+                    stok_input_dict[b_name] = st.number_input(
+                        f"Stok dibawa {b_name}",
+                        min_value=0,
+                        step=1,
+                        value=int(existing_stok),
+                        label_visibility="collapsed",
+                        key=f"inp_stok_sup_{today_str_sup}_{idx_b}_{b_name}",
+                    )
+        btn_save_stok_sup = st.form_submit_button("💾 Simpan Stok Dibawa Supervisi", type="primary", use_container_width=True)
+        if btn_save_stok_sup:
+            for b_name, qty_val in stok_input_dict.items():
+                k_stok = _stok_sup_key(today_str_sup, st.session_state["user_spg"], b_name)
+                stok_sup_map[k_stok] = int(qty_val)
+            if save_stok_supervisi(stok_sup_map):
+                st.success("✅ Jumlah stok rokok yang dibawa Supervisi berhasil disimpan!")
+                st.rerun()
+
+    st.markdown("#### 👩‍💼 Breakdown Penjualan Per Nama SPG Hari Ini")
+    spg_cols = st.columns(min(2, len(spg_2_list)) if spg_2_list else 1)
+    for idx_s, spg_nm in enumerate(spg_2_list[:2]):
+        df_s = (
+            df_team_spg_today[
+                df_team_spg_today["Nama_SPG"].astype(str).str.strip().str.casefold() == spg_nm.strip().casefold()
+            ]
+            if not df_team_spg_today.empty
+            else pd.DataFrame()
+        )
+        bks_s = int(df_s["Jumlah_Bungkus"].sum()) if not df_s.empty else 0
+        uang_s = int(df_s["Total_Uang_Rp"].sum()) if not df_s.empty else 0
+        trx_s = int(len(df_s)) if not df_s.empty else 0
+        with spg_cols[idx_s % len(spg_cols)]:
+            st.markdown(
+                f"""
+                <div class="dashboard-card">
+                    <div>
+                        <div style="font-size:0.85rem;font-weight:700;color:#334155;">👩‍💼 {spg_nm}</div>
+                        <div class="card-value" style="margin-top:6px;">{bks_s:,} bks</div>
+                        <div class="card-subtext">Rp {uang_s:,} • {trx_s} transaksi</div>
+                    </div>
+                    <div class="card-label">Penjualan SPG #{idx_s + 1} Hari Ini</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    if not df_team_spg_today.empty:
+        df_breakdown_spg_merk = (
+            df_team_spg_today.groupby(["Nama_SPG", "Brand_Rokok"])
+            .agg(
+                Transaksi=("Nama_Konsumen", "count"),
+                Terjual_Bungkus=("Jumlah_Bungkus", "sum"),
+                Total_Uang_Rp=("Total_Uang_Rp", "sum"),
+            )
+            .reset_index()
+        )
+        df_breakdown_spg_merk["Terjual_Bungkus"] = df_breakdown_spg_merk["Terjual_Bungkus"].astype(int)
+        df_breakdown_spg_merk["Total_Uang_Rp"] = df_breakdown_spg_merk["Total_Uang_Rp"].astype(int)
+        st.dataframe(df_breakdown_spg_merk, use_container_width=True, hide_index=True)
+    else:
+        st.info("Belum ada penjualan SPG tercatat hari ini.")
+
+    st.markdown("#### 📊 Rekap Stok Dibawa, Terjual 2 SPG & Sisa Stok Per Merk")
+    rows_stok_rekap = []
+    for b_name in brand_list_sup_stok:
+        stok_dibawa = get_stok_awal_supervisi(today_str_sup, st.session_state["user_spg"], b_name, stok_sup_map)
+        df_b = (
+            df_team_spg_today[
+                df_team_spg_today["Brand_Rokok"].astype(str).str.strip().str.casefold() == b_name.strip().casefold()
+            ]
+            if not df_team_spg_today.empty
+            else pd.DataFrame()
+        )
+        terjual_spg_b = int(df_b["Jumlah_Bungkus"].sum()) if not df_b.empty else 0
+        sisa_stok_b = stok_dibawa - terjual_spg_b
+        uang_b = int(df_b["Total_Uang_Rp"].sum()) if not df_b.empty else 0
+
+        r_detail = {"Merk_Rokok": b_name, "Stok_Dibawa": stok_dibawa}
+        for spg_nm in spg_2_list[:2]:
+            col_key = f"Terjual_{spg_nm}"
+            if not df_b.empty:
+                val_spg_b = int(
+                    df_b[df_b["Nama_SPG"].astype(str).str.strip().str.casefold() == spg_nm.strip().casefold()][
+                        "Jumlah_Bungkus"
+                    ].sum()
+                )
+            else:
+                val_spg_b = 0
+            r_detail[col_key] = val_spg_b
+
+        r_detail["Total_Terjual_SPG"] = terjual_spg_b
+        r_detail["Sisa_Stok"] = sisa_stok_b
+        r_detail["Uang_Merk_Rp"] = uang_b
+        rows_stok_rekap.append(r_detail)
+
+    if rows_stok_rekap:
+        df_stok_rekap = pd.DataFrame(rows_stok_rekap)
+        st.dataframe(df_stok_rekap, use_container_width=True, hide_index=True)
+
+        total_stok_dibawa_all = int(df_stok_rekap["Stok_Dibawa"].sum())
+        total_terjual_all = int(df_stok_rekap["Total_Terjual_SPG"].sum())
+        total_sisa_stok_all = int(df_stok_rekap["Sisa_Stok"].sum())
+        st.info(
+            f"📦 **Ringkasan Stok Hari Ini:** Stok Dibawa: **{total_stok_dibawa_all:,} bks** • "
+            f"Terjual 2 SPG: **{total_terjual_all:,} bks** • "
+            f"**Sisa Stok: {total_sisa_stok_all:,} bks**"
+        )
+    else:
+        st.info("Belum ada data stok atau merk untuk direkap.")
 
     st.markdown("#### 📑 Log Detail Konsumen Beli (SPG) di Warkop Ini")
     if not df_lkk_active_spg.empty:
