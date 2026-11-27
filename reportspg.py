@@ -2164,11 +2164,11 @@ def reset_session_on_user_change():
     st.session_state["draft_konsumen"] = ""
     st.session_state["draft_nohp"] = ""
     st.session_state["draft_ig"] = ""
-    st.session_state["draft_bungkus"] = 1
+    st.session_state["draft_bungkus"] = 0
     st.session_state["draft_bumo"] = ""
     st.session_state["draft_brand"] = ""
     st.session_state["draft_gender"] = "L"
-    st.session_state["draft_range_umur"] = "18-24"
+    st.session_state["draft_range_umur"] = ""
     st.session_state["spg_form_nonce"] = st.session_state.get("spg_form_nonce", 0) + 1
     st.session_state["sup_kontak_nonce"] = st.session_state.get("sup_kontak_nonce", 0) + 1
 
@@ -2204,7 +2204,7 @@ if "draft_nohp" not in st.session_state:
 if "draft_ig" not in st.session_state:
     st.session_state["draft_ig"] = ""
 if "draft_bungkus" not in st.session_state:
-    st.session_state["draft_bungkus"] = 1
+    st.session_state["draft_bungkus"] = 0
 if "draft_bumo" not in st.session_state:
     st.session_state["draft_bumo"] = ""
 if "draft_brand" not in st.session_state:
@@ -2212,7 +2212,7 @@ if "draft_brand" not in st.session_state:
 if "draft_gender" not in st.session_state:
     st.session_state["draft_gender"] = "L"
 if "draft_range_umur" not in st.session_state:
-    st.session_state["draft_range_umur"] = "18-24"
+    st.session_state["draft_range_umur"] = ""
 if "spg_form_nonce" not in st.session_state:
     st.session_state["spg_form_nonce"] = 0
 if "sup_kontak_nonce" not in st.session_state:
@@ -4560,7 +4560,7 @@ elif is_inside_geofence and str(nama_spg_manual).strip() != "":
             if st.session_state.get("draft_gender") in gender_options
             else 0
         )
-        age_options = ["18-24", "25-30", "31-35", "36-44", "45+"]
+        age_options = ["", "18-24", "25-30", "31-35", "36-44", "45+"]
         default_age_idx = (
             age_options.index(st.session_state["draft_range_umur"])
             if st.session_state.get("draft_range_umur") in age_options
@@ -4579,9 +4579,9 @@ elif is_inside_geofence and str(nama_spg_manual).strip() != "":
         with col_f2:
             jumlah_bungkus = st.number_input(
                 "📦 Jumlah Bungkus",
-                min_value=1,
+                min_value=0,
                 step=1,
-                value=int(st.session_state.get("draft_bungkus", 1) or 1),
+                value=int(st.session_state.get("draft_bungkus", 0) or 0),
                 key=f"spg_bungkus_{spg_nonce}",
             )
 
@@ -4606,6 +4606,7 @@ elif is_inside_geofence and str(nama_spg_manual).strip() != "":
                 "🎂 Range Umur",
                 options=age_options,
                 index=default_age_idx,
+                format_func=lambda x: "-- Pilih Range Umur --" if x == "" else x,
                 key=f"spg_umur_{spg_nonce}",
             )
 
@@ -4652,6 +4653,8 @@ elif is_inside_geofence and str(nama_spg_manual).strip() != "":
         if btn_kirim:
             if not nama_konsumen.strip():
                 st.warning("Mohon isi nama konsumen.")
+            elif int(jumlah_bungkus) <= 0:
+                st.warning("Jumlah bungkus harus lebih dari 0.")
             else:
                 ig_formatted = f"@{instagram_input.strip().lstrip('@')}" if instagram_input.strip() else "-"
                 waktu_wib = datetime.utcnow() + timedelta(hours=7)
@@ -4670,7 +4673,7 @@ elif is_inside_geofence and str(nama_spg_manual).strip() != "":
                     "Range_Umur": range_umur_entry,
                     "No_HP": nohp_entry.strip(),
                     "Instagram": ig_formatted,
-                    "Jumlah_Bungkus": jumlah_bungkus,
+                    "Jumlah_Bungkus": int(jumlah_bungkus),
                     "Rokok_Asal_BUMO": rokok_asal_bumo.strip(),
                     "Latitude": user_lat,
                     "Longitude": user_lon,
@@ -4682,11 +4685,11 @@ elif is_inside_geofence and str(nama_spg_manual).strip() != "":
 
                 st.session_state["draft_brand"] = ""
                 st.session_state["draft_gender"] = "L"
-                st.session_state["draft_range_umur"] = "18-24"
+                st.session_state["draft_range_umur"] = ""
                 st.session_state["draft_konsumen"] = ""
                 st.session_state["draft_nohp"] = ""
                 st.session_state["draft_ig"] = ""
-                st.session_state["draft_bungkus"] = 1
+                st.session_state["draft_bungkus"] = 0
                 st.session_state["draft_bumo"] = ""
                 st.session_state["spg_form_nonce"] = spg_nonce + 1
                 st.session_state["spg_last_saved_msg"] = (
@@ -4807,118 +4810,3 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
-
-# --- 4. EVALUASI HARIAN & LOG REKAP ---
-st.markdown("---")
-st.markdown(f"### 📈 Evaluasi Harian & Log Rekap: {st.session_state['user_spg']} ({st.session_state['kota_kab']})")
-
-df_master_all = load_database()
-df_sup_all_eval = load_supervisi_database()
-
-if not df_master_all.empty and "Promotor" in df_master_all.columns:
-    df_user_rekap = df_master_all[df_master_all["Promotor"] == st.session_state["user_spg"]].copy()
-else:
-    df_user_rekap = pd.DataFrame()
-
-if not df_user_rekap.empty:
-    df_user_rekap["Waktu_Dt"] = pd.to_datetime(df_user_rekap["Waktu"], errors="coerce")
-    df_user_rekap["Tanggal"] = df_user_rekap["Waktu_Dt"].dt.strftime("%d-%m-%Y")
-    df_user_rekap = add_custom_week_columns(df_user_rekap, "Waktu_Dt")
-    df_user_rekap["Nama_SPG"] = df_user_rekap["Nama_SPG"].fillna("-")
-    df_user_rekap["Jumlah_Bungkus"] = pd.to_numeric(df_user_rekap["Jumlah_Bungkus"], errors="coerce").fillna(0)
-
-    all_weeks_user = sorted(df_user_rekap["Periode_Minggu"].dropna().unique().tolist(), reverse=True)
-    selected_user_weeks = st.multiselect("Filter Periode Minggu (Evaluasi Anda)", options=all_weeks_user, default=all_weeks_user, key="spg_user_week_filter")
-
-    if selected_user_weeks:
-        df_user_rekap_filtered = df_user_rekap[df_user_rekap["Periode_Minggu"].isin(selected_user_weeks)].copy()
-    else:
-        df_user_rekap_filtered = df_user_rekap.copy()
-
-    team_contact_by_date = {}
-    if not df_sup_all_eval.empty and "Promotor" in df_sup_all_eval.columns:
-        df_sup_team_eval = df_sup_all_eval[
-            df_sup_all_eval["Promotor"].astype(str).str.strip().str.casefold()
-            == str(st.session_state["user_spg"]).strip().casefold()
-        ].copy()
-        if not df_sup_team_eval.empty:
-            df_sup_team_eval["Waktu_Dt"] = pd.to_datetime(df_sup_team_eval["Waktu"], errors="coerce")
-            df_sup_team_eval["Tanggal"] = df_sup_team_eval["Waktu_Dt"].dt.strftime("%d-%m-%Y")
-            df_sup_team_eval["Jumlah_Kontak_Manual"] = pd.to_numeric(
-                df_sup_team_eval["Jumlah_Kontak_Manual"], errors="coerce"
-            ).fillna(0).astype(int)
-            team_contact_by_date = (
-                df_sup_team_eval.groupby("Tanggal")["Jumlah_Kontak_Manual"].sum().to_dict()
-            )
-
-    st.markdown("#### 📋 Tabel Evaluasi Harian Per SPG (Berdasarkan Target SPG)")
-
-    df_eval_spg = (
-        df_user_rekap_filtered.groupby(["Tanggal", "Periode_Minggu", "Nama_SPG", "Brand_Rokok"])
-        .agg(
-            Jumlah_Titik_Warkop=("Warkop_LKK", lambda x: x.nunique()),
-            Konsumen_Beli=("Nama_Konsumen", "count"),
-            Jumlah_Omset_SPG=("Jumlah_Bungkus", "sum"),
-        )
-        .reset_index()
-    )
-
-    df_eval_spg["Brand_Rokok_Clean"] = df_eval_spg["Brand_Rokok"].apply(clean_brand_target_name)
-    df_eval_spg = (
-        df_eval_spg.groupby(["Tanggal", "Periode_Minggu", "Nama_SPG", "Brand_Rokok_Clean"])
-        .agg(
-            Jumlah_Titik_Warkop=("Jumlah_Titik_Warkop", "max"),
-            Konsumen_Beli=("Konsumen_Beli", "sum"),
-            Jumlah_Omset_SPG=("Jumlah_Omset_SPG", "sum"),
-        )
-        .reset_index()
-        .rename(columns={"Brand_Rokok_Clean": "Brand_Rokok"})
-    )
-
-    df_eval_spg["Kontak_Supervisi_Team"] = df_eval_spg["Tanggal"].map(
-        lambda t: int(team_contact_by_date.get(t, 0))
-    )
-    df_eval_spg["Target_SPG"] = df_eval_spg["Brand_Rokok"].apply(
-        lambda brand: get_target_for_brand(brand, "target_spg", 25)
-    )
-    df_eval_spg["Status_Target_SPG"] = df_eval_spg.apply(
-        lambda r: "Achieved" if r["Jumlah_Omset_SPG"] >= r["Target_SPG"] else "Not Achieved",
-        axis=1
-    )
-
-    cols_eval_order = [
-        "Tanggal",
-        "Periode_Minggu",
-        "Nama_SPG",
-        "Brand_Rokok",
-        "Jumlah_Titik_Warkop",
-        "Kontak_Supervisi_Team",
-        "Konsumen_Beli",
-        "Jumlah_Omset_SPG",
-        "Target_SPG",
-        "Status_Target_SPG",
-    ]
-    df_eval_spg = df_eval_spg[[c for c in cols_eval_order if c in df_eval_spg.columns]]
-
-    st.dataframe(df_eval_spg.style.map(style_status_target, subset=["Status_Target_SPG"]), use_container_width=True)
-
-    st.markdown("---")
-    st.markdown("#### 📑 Log Detail Transaksi & Pengaturan")
-
-    cols_to_drop_spg = ["Plat_Mobil", "Waktu_Dt"] if "Plat_Mobil" in df_user_rekap_filtered.columns else ["Waktu_Dt"]
-    st.dataframe(df_user_rekap_filtered.drop(columns=cols_to_drop_spg, errors="ignore"), use_container_width=True)
-
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df_eval_spg.to_excel(writer, index=False, sheet_name="Evaluasi Harian SPG")
-        df_user_rekap_filtered.drop(columns=["Waktu_Dt"], errors="ignore").to_excel(writer, index=False, sheet_name="Detail Transaksi")
-
-    st.download_button(
-        label=f"📥 Download Rekap Excel (.xlsx) - {st.session_state['user_spg']}",
-        data=output.getvalue(),
-        file_name=(f"rekap_evaluasi_{st.session_state['user_spg'].replace(' ', '_')}_{st.session_state['kota_kab']}_{(datetime.utcnow() + timedelta(hours=7)).strftime('%Y%m%d_%H%M%S')}.xlsx"),
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary",
-    )
-else:
-    st.info(f"Belum ada data laporan tersimpan untuk {st.session_state['user_spg']}.")
