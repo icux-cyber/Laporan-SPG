@@ -3721,7 +3721,7 @@ if not st.session_state["logged_in"]:
     )
 
     st.markdown('<div class="section-title">1️⃣ Pilih Peran Masuk</div>', unsafe_allow_html=True)
-    col_btn_mode1, col_btn_mode2 = st.columns(3)
+    col_btn_mode1, col_btn_mode2, col_btn_mode3 = st.columns(3)
     with col_btn_mode1:
         if st.button(
             "📝 Masuk sebagai SPG",
