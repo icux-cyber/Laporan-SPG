@@ -419,13 +419,53 @@ DEFAULT_SUPERVISI_PIN = "1122"
 DEFAULT_SPG_PIN = "2233"
 
 
+def _file_mtime(path: str) -> float:
+    return os.path.getmtime(path) if os.path.exists(path) else 0.0
+
+
+@st.cache_data(show_spinner=False)
+def _cached_read_csv(path: str, mtime: float) -> pd.DataFrame:
+    return pd.read_csv(path)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_read_excel(path: str, mtime: float) -> pd.DataFrame:
+    df = pd.read_excel(path)
+    df.columns = [str(c).strip() for c in df.columns]
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def _cached_read_json(path: str, mtime: float):
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw_text = f.read().strip()
+        if not raw_text:
+            return None
+        return json.loads(raw_text)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+@st.cache_data(show_spinner=False)
+def _cached_read_json_no_mtime(path: str, _mtime: float = 0.0) -> dict | list | None:
+    """Membaca file JSON secara aman dengan proteksi file kosong/rusak dan pelacakan mtime."""
+    return _cached_read_json(path, _mtime)
+
+
+def _read_json_safe(path: str) -> dict | list | None:
+    return _cached_read_json_no_mtime(path, _file_mtime(path))
+
+
 def _hash_pin(pin_plain: str) -> str:
     return hashlib.sha256(str(pin_plain or "").strip().encode("utf-8")).hexdigest()
 
 
 def load_master_akses() -> dict:
     """Memuat pengaturan PIN/akses per peran & per nama personil."""
-    data = _cached_read_json_no_mtime(MASTER_AKSES_FILE)
+    data = _read_json_safe(MASTER_AKSES_FILE)
     base = {
         "supervisi_default_pin": DEFAULT_SUPERVISI_PIN,
         "spg_default_pin": DEFAULT_SPG_PIN,
@@ -511,7 +551,7 @@ def _stok_sup_key(tanggal_str: str, team_name: str, brand_name: str) -> str:
 
 
 def load_stok_supervisi() -> dict:
-    data = _cached_read_json_no_mtime(STOK_SUPERVISI_FILE)
+    data = _read_json_safe(STOK_SUPERVISI_FILE)
     return data if isinstance(data, dict) else {}
 
 
@@ -551,7 +591,7 @@ DEFAULT_HARGA_KONSUMEN = {
 
 
 def load_harga_konsumen() -> dict:
-    data = _cached_read_json_no_mtime(MASTER_HARGA_FILE)
+    data = _read_json_safe(MASTER_HARGA_FILE)
     if isinstance(data, dict) and data:
         cleaned = {}
         for k, v in data.items():
@@ -651,15 +691,8 @@ def _warkop_status_key(kota: str, kecamatan: str, warkop: str) -> str:
 
 
 def load_warkop_visit_status_map() -> dict:
-    if os.path.exists(WARKOP_VISIT_STATUS_FILE):
-        try:
-            with open(WARKOP_VISIT_STATUS_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    return data
-        except Exception:
-            pass
-    return {}
+    data = _read_json_safe(WARKOP_VISIT_STATUS_FILE)
+    return data if isinstance(data, dict) else {}
 
 
 def save_warkop_visit_status_map(status_map: dict) -> bool:
@@ -675,6 +708,7 @@ def save_warkop_visit_status_map(status_map: dict) -> bool:
                 cleaned[str(k)] = VISIT_STATUS_WAJIB
         with open(WARKOP_VISIT_STATUS_FILE, "w", encoding="utf-8") as f:
             json.dump(cleaned, f, ensure_ascii=False, indent=2)
+        st.cache_data.clear()
         return True
     except Exception as e:
         st.error(f"Gagal menyimpan status warkop wajib/tidak wajib: {e}")
@@ -721,14 +755,8 @@ def build_warkop_status_dataframe(df_lokasi: pd.DataFrame, status_map: dict | No
 
 
 def load_locked_lkk_points() -> dict:
-    if os.path.exists(LOCKED_LKK_POINT_FILE):
-        try:
-            with open(LOCKED_LKK_POINT_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return data if isinstance(data, dict) else {}
-        except Exception:
-            return {}
-    return {}
+    data = _read_json_safe(LOCKED_LKK_POINT_FILE)
+    return data if isinstance(data, dict) else {}
 
 
 def save_locked_lkk_point(team_name: str, point_info: dict) -> bool:
@@ -743,6 +771,7 @@ def save_locked_lkk_point(team_name: str, point_info: dict) -> bool:
     try:
         with open(LOCKED_LKK_POINT_FILE, "w", encoding="utf-8") as f:
             json.dump(all_locked, f, ensure_ascii=False, indent=2)
+        st.cache_data.clear()
         return True
     except Exception as e:
         st.error(f"Gagal menyimpan titik LKK aktif: {e}")
@@ -864,10 +893,7 @@ def load_supabase_backup_data():
     df_wrk = pd.read_excel(MASTER_LOKASI_FILE) if os.path.exists(MASTER_LOKASI_FILE) else pd.DataFrame()
 
     def read_json_file(file_path):
-        if not os.path.exists(file_path):
-            return None
-        with open(file_path, "r", encoding="utf-8") as file:
-            return json.load(file)
+        return _read_json_safe(file_path)
 
     return {
         "backup_version": 1,
@@ -1178,38 +1204,6 @@ def add_custom_week_columns(df, date_col="Waktu_Dt"):
         periods.append(p_label)
     df["Periode_Minggu"] = periods
     return df
-
-
-def _file_mtime(path: str) -> float:
-    return os.path.getmtime(path) if os.path.exists(path) else 0.0
-
-
-@st.cache_data(show_spinner=False)
-def _cached_read_csv(path: str, mtime: float) -> pd.DataFrame:
-    return pd.read_csv(path)
-
-
-@st.cache_data(show_spinner=False)
-def _cached_read_excel(path: str, mtime: float) -> pd.DataFrame:
-    df = pd.read_excel(path)
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
-
-
-@st.cache_data(show_spinner=False)
-def _cached_read_json(path: str, mtime: float):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-@st.cache_data(show_spinner=False)
-def _cached_read_json_no_mtime(path: str) -> dict | list | None:
-    """Cache JSON tanpa parameter mtime — untuk file master yang jarang berubah.
-    Cache di-invalidasi manual via st.cache_data.clear() saat save."""
-    if not os.path.exists(path):
-        return None
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
 
 
 # ====================================================
@@ -1606,7 +1600,7 @@ DEFAULT_PLATS = ["L 1234 ABC"]
 
 def load_master_team_names():
     default_teams = {f"Team SPG {i}": f"Team SPG {i}" for i in range(1, 21)}
-    data = _cached_read_json_no_mtime(MASTER_TEAM_NAME_FILE)
+    data = _read_json_safe(MASTER_TEAM_NAME_FILE)
     if not isinstance(data, dict):
         save_master_team_names(default_teams)
         return default_teams
@@ -1646,7 +1640,7 @@ def save_master_team_names(team_names_dict):
 
 
 def load_master_brands():
-    data = _cached_read_json_no_mtime(MASTER_BRAND_FILE)
+    data = _read_json_safe(MASTER_BRAND_FILE)
     return data if isinstance(data, list) else DEFAULT_BRANDS
 
 
@@ -1669,7 +1663,7 @@ def load_master_team_brands():
         team_name: match_brands_by_team_name(team_name, current_brands)
         for team_name in active_team_names
     }
-    data = _cached_read_json_no_mtime(MASTER_TEAM_BRAND_FILE)
+    data = _read_json_safe(MASTER_TEAM_BRAND_FILE)
     if not isinstance(data, dict):
         save_master_team_brands(default_teams)
         return default_teams
@@ -1696,7 +1690,7 @@ def save_master_team_brands(team_brands):
 
 
 def load_master_plat_kendaraan():
-    data = _cached_read_json_no_mtime(MASTER_PLAT_FILE)
+    data = _read_json_safe(MASTER_PLAT_FILE)
     if isinstance(data, list):
         return data
     if isinstance(data, dict):
@@ -1711,7 +1705,7 @@ def save_master_plat_kendaraan(plat_list):
 
 
 def load_master_spgs():
-    data = _cached_read_json_no_mtime(MASTER_SPG_FILE)
+    data = _read_json_safe(MASTER_SPG_FILE)
     return data if isinstance(data, list) else DEFAULT_SPGS
 
 
@@ -1856,7 +1850,7 @@ TARGET_GROUP_OPTIONS = {
 
 
 def load_target_rules():
-    data = _cached_read_json_no_mtime(MASTER_TARGET_FILE)
+    data = _read_json_safe(MASTER_TARGET_FILE)
     return data if isinstance(data, dict) else dict(DEFAULT_TARGET_RULES)
 
 
@@ -2009,7 +2003,7 @@ def render_rekapitulasi_penjualan_report(team_name: str, target_date_str: str, a
     total_uang_2spg_today = int(df_team_spg_today["Total_Uang_Rp"].sum()) if not df_team_spg_today.empty else 0
 
     # --- 1. REKAP PENJUALAN 2 SPG & KONTROL STOK ROKOK ---
-    st.markdown(f"### 1️⃣ Rekap Penjualan & Stok Rokok ({team_name})")
+    st.markdown(f"### 1️⃣ Rekap Penjualan 2 SPG & Kontrol Stok Rokok ({team_name})")
     st.caption("Dashboard Monitoring")
 
     st.info(
@@ -2312,7 +2306,7 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
                 + list(akses_cfg.get("supervisi_pins", {}).keys())
             )
         )
-        sched_detail_raw = _cached_read_json_no_mtime(SCHEDULE_DETAIL_FILE)
+        sched_detail_raw = _read_json_safe(SCHEDULE_DETAIL_FILE)
         if isinstance(sched_detail_raw, dict):
             for rec in sched_detail_raw.values():
                 if isinstance(rec, dict):
@@ -2384,7 +2378,7 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
         st.stop()
 
     # --- MASTER NAMA TEAM ---
-    if st.session_state["admin_view"] == "Master_Nama_Team":
+    elif st.session_state["admin_view"] == "Master_Nama_Team":
         st.markdown("## 🏷️ Master Data: Nama Team (1 - 20)")
         st.caption("Ubah dan sesuaikan nama alias untuk Team SPG 1 sampai 20. Perubahan akan otomatis terhubung ke menu alokasi brand dan login.")
 
@@ -4256,7 +4250,7 @@ if st.session_state["login_mode"] == "Supervisi":
         """, unsafe_allow_html=True)
 
     st.markdown("---")
-    st.markdown("### Dashboard Monitoring : Team Super AA 1 (Plat Mobil: L 1234 ABC)")
+    st.markdown("### 👀 Dashboard Monitoring & Entry Supervisi: Team Super AA 1 (Plat Mobil: L 1234 ABC)")
 
     sup_nonce = st.session_state.get("sup_kontak_nonce", 0)
     with st.form(f"form_entry_kontak_supervisi_{sup_nonce}"):
