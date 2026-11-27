@@ -6,7 +6,7 @@ TEAM_NAMES_FILE = "master_nama_team.json"
 TEAM_BRANDS_FILE = "master_team_brand.json"
 BRANDS_FILE = "master_brand_rokok.json"
 VEHICLES_FILE = "master_plat_kendaraan.json"
-MASTER_SPG_FILE = "master_spg.json"
+MASTER_SPG_FILE = "master_nama_spg.json"
 
 DEFAULT_TEAM_BRANDS_FALLBACK = [
     "D.Super 12",
@@ -192,7 +192,7 @@ def sync_masters_from_schedule_upload(
     Sinkronisasi otomatis saat admin mengunggah file Excel jadwal:
     - Mengisi master_nama_team.json berdasarkan urutan nama team aktif di Excel.
     - Menggabungkan plat kendaraan baru dari Excel ke master_plat_kendaraan.json.
-    - Menggabungkan nama SPG 1 & SPG 2 baru dari Excel ke master_spg.json.
+    - Menggabungkan nama SPG 1 & SPG 2 baru dari Excel ke master_nama_spg.json.
     - Menyelaraskan master_team_brand.json berdasarkan kata kunci nama team.
     """
     clean_teams = []
@@ -242,7 +242,7 @@ def sync_masters_from_schedule_upload(
         if added_vehicles:
             _write_json_atomic(vehicles_file, merged_vehicles)
 
-    # Sinkronisasi nama SPG 1 & SPG 2 dari jadwal Excel ke master_spg.json
+    # Sinkronisasi nama SPG 1 & SPG 2 dari jadwal Excel ke master_nama_spg.json
     added_spgs = []
     if uploaded_spgs:
         existing_spg_raw = _read_json_safe(spg_file, [])
@@ -279,4 +279,107 @@ def sync_masters_from_schedule_upload(
         "added_vehicles": added_vehicles,
         "added_spgs": added_spgs,
         "team_brands": synced_team_brands,
+    }
+
+HARGA_KONSUMEN_FILE = "master_harga_konsumen.json"
+
+DEFAULT_HARGA_KONSUMEN_FALLBACK = {
+    "Black Matcha K12": 22000,
+    "D.Super 12": 24000,
+    "D.Super Kretek": 16000,
+    "D.76 Apel Royal": 18000,
+    "D.76 Apel": 16000,
+    "Djarum 76 Aksara": 16000,
+    "Black Matcha Siro": 23000,
+    "Black Matcha Kuro": 23000,
+}
+
+
+def normalize_brand_label(brand: str) -> str:
+    return "".join(str(brand or "").casefold().split())
+
+
+def load_consumer_prices(harga_file: str = HARGA_KONSUMEN_FILE) -> dict[str, int]:
+    raw = _read_json_safe(harga_file, DEFAULT_HARGA_KONSUMEN_FALLBACK)
+    if not isinstance(raw, dict):
+        return dict(DEFAULT_HARGA_KONSUMEN_FALLBACK)
+    cleaned: dict[str, int] = {}
+    for k, v in raw.items():
+        label = str(k or "").strip()
+        if not label:
+            continue
+        try:
+            cleaned[label] = max(0, int(float(v)))
+        except (ValueError, TypeError):
+            cleaned[label] = 0
+    return cleaned if cleaned else dict(DEFAULT_HARGA_KONSUMEN_FALLBACK)
+
+
+def save_consumer_prices(harga_map: dict, harga_file: str = HARGA_KONSUMEN_FILE) -> bool:
+    cleaned: dict[str, int] = {}
+    for k, v in (harga_map or {}).items():
+        label = str(k or "").strip()
+        if not label:
+            continue
+        try:
+            cleaned[label] = max(0, int(float(v)))
+        except (ValueError, TypeError):
+            cleaned[label] = 0
+    return _write_json_atomic(harga_file, cleaned)
+
+
+def get_consumer_price_for_brand(brand: str, harga_map: dict | None = None) -> int:
+    hmap = load_consumer_prices() if harga_map is None else harga_map
+    b_norm = normalize_brand_label(brand)
+    if not b_norm:
+        return 0
+    for k, v in hmap.items():
+        if normalize_brand_label(k) == b_norm:
+            try:
+                return max(0, int(float(v)))
+            except (ValueError, TypeError):
+                return 0
+    return 0
+
+
+def sync_brand_price_entry(
+    brand_name: str,
+    price_per_pack: int,
+    brands_file: str = BRANDS_FILE,
+    harga_file: str = HARGA_KONSUMEN_FILE,
+) -> tuple[bool, dict]:
+    """Menyimpan merk baru (jika belum ada di daftar merk) dan memperbarui harga konsumen per bungkus."""
+    b_clean = str(brand_name or "").strip()
+    if not b_clean:
+        return False, {"error": "Nama merk tidak boleh kosong."}
+
+    try:
+        price_val = max(0, int(float(price_per_pack)))
+    except (ValueError, TypeError):
+        price_val = 0
+
+    brands = load_active_brands(brands_file)
+    if not any(normalize_brand_label(b) == normalize_brand_label(b_clean) for b in brands):
+        brands.append(b_clean)
+        if not _write_json_atomic(brands_file, brands):
+            return False, {"error": f"Gagal memperbarui {brands_file}"}
+
+    harga_map = load_consumer_prices(harga_file)
+    replaced_key = None
+    for existing_k in list(harga_map.keys()):
+        if normalize_brand_label(existing_k) == normalize_brand_label(b_clean):
+            replaced_key = existing_k
+            break
+    if replaced_key and replaced_key != b_clean:
+        del harga_map[replaced_key]
+    harga_map[b_clean] = price_val
+
+    if not save_consumer_prices(harga_map, harga_file):
+        return False, {"error": f"Gagal memperbarui {harga_file}"}
+
+    return True, {
+        "brand": b_clean,
+        "price": price_val,
+        "brands": brands,
+        "prices": harga_map,
     }
