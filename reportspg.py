@@ -33,6 +33,7 @@ except ImportError:
             "vehicles": [],
             "records": [],
         }
+
 from team_brand_sync import (
     match_brands_by_team_name,
     resolve_team_allowed_brands,
@@ -61,7 +62,6 @@ if str(st.query_params.get("page", "")).strip().lower() != "admin":
         """,
         unsafe_allow_html=True,
     )
-
 
 
 def get_team_theme(team_name: str) -> dict:
@@ -448,6 +448,7 @@ def get_stok_awal_supervisi(tanggal_str: str, team_name: str, brand_name: str, s
     except (ValueError, TypeError):
         return 0
 
+
 DEFAULT_HARGA_KONSUMEN = {
     "Black Matcha K12": 22000,
     "D.Super 12": 24000,
@@ -503,6 +504,8 @@ def get_harga_konsumen_brand(brand: str, harga_map: dict | None = None) -> int:
             except (ValueError, TypeError):
                 return 0
     return 0
+
+
 MASTER_LOKASI_FILE = "Master WarkopLKK.xlsx"
 MASTER_SPG_FILE = "master_nama_spg.json"
 MASTER_TEAM_BRAND_FILE = "master_team_brand.json"
@@ -626,7 +629,6 @@ def build_warkop_status_dataframe(df_lokasi: pd.DataFrame, status_map: dict | No
         for k, kc, w in zip(out["Kota"], out["Kecamatan"], out["Nama Warkop / LKK"])
     ]
     return out[empty_cols]
-
 
 
 def load_locked_lkk_points() -> dict:
@@ -1357,6 +1359,7 @@ def load_kecamatan_geojson(nm_kecamatan: str, mtime: float = 0.0) -> dict | None
         st.error(f"Gagal memuat GeoJSON kecamatan '{nm_kecamatan}': {e}")
         return None
 
+
 @st.cache_data(ttl=3600, max_entries=40, show_spinner=False)
 def load_kecamatan_gdf(nm_kecamatan: str, mtime: float = 0.0):
     data = load_kecamatan_geojson(nm_kecamatan, mtime)
@@ -1487,23 +1490,6 @@ def get_scheduled_slots_for_date(target_date: date | None = None) -> list[dict]:
 
     slots.sort(key=lambda item: (item["tanggal"], item["team"].casefold(), item["kota"].casefold(), item["kecamatan"].casefold()))
     return slots
-
-
-# ====================================================
-# MASTER BRAND / TARGET / TEAM / PLAT / NAMA TEAM
-# ====================================================
-DEFAULT_BRANDS = [
-    "D.Super 12",
-    "D.Super Kretek",
-    "D.76 Apel",
-    "D.76 Apel Royal",
-    "Black Matcha K12",
-    "Djarum 76 Aksara",
-    "Black Matcha Siro",
-    "Black Matcha Kuro",
-]
-DEFAULT_SPGS = ["Nanda"]
-DEFAULT_PLATS = ["L 1234 ABC"]
 
 
 # ====================================================
@@ -1639,6 +1625,7 @@ def save_master_spgs(spgs):
         json.dump(spgs, f, ensure_ascii=False, indent=2)
     st.cache_data.clear()
 
+
 def load_master_lokasi_excel():
     if os.path.exists(MASTER_LOKASI_FILE):
         try:
@@ -1664,21 +1651,6 @@ def save_master_lokasi_excel(df_excel):
     except Exception as e:
         st.error(f"Gagal menyimpan file Excel: {e}")
         return False
-
-
-def load_master_spgs():
-    if os.path.exists(MASTER_SPG_FILE):
-        try:
-            with open(MASTER_SPG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return DEFAULT_SPGS
-    return DEFAULT_SPGS
-
-
-def save_master_spgs(spgs):
-    with open(MASTER_SPG_FILE, "w", encoding="utf-8") as f:
-        json.dump(spgs, f, ensure_ascii=False, indent=2)
 
 
 # ====================================================
@@ -1787,6 +1759,7 @@ TARGET_GROUP_OPTIONS = {
     "Black_Matcha": TARGET_GROUP_LABELS["Black_Matcha"],
 }
 
+
 def load_target_rules():
     data = _cached_read_json_no_mtime(MASTER_TARGET_FILE)
     return data if isinstance(data, dict) else dict(DEFAULT_TARGET_RULES)
@@ -1809,6 +1782,7 @@ def save_target_rules(rules):
 
 TARGET_RULES = load_target_rules()
 
+
 def normalize_brand_key(brand):
     return "".join(str(brand).casefold().split())
 
@@ -1819,6 +1793,7 @@ def get_brand_target_rule(brand):
         (rule for rule_brand, rule in TARGET_RULES.items() if normalize_brand_key(rule_brand) == brand_key),
         {},
     )
+
 
 def clean_brand_target_name(brand):
     group = get_brand_target_rule(brand).get("group")
@@ -1834,6 +1809,7 @@ def get_group_target(group_name, target_key, default_val):
         if rule_group == group_name and target_key in rule:
             return rule[target_key]
     return default_val
+
 
 def get_target_for_brand(brand, target_key, default_val):
     brand_str = str(brand or "").strip()
@@ -1859,6 +1835,223 @@ def style_status_target(val):
     elif val == "Achieved":
         return "color: #16A34A; font-weight: 700;"
     return ""
+
+
+# ====================================================
+# FUNGSI REPORT REKAPITULASI PENJUALAN & KONTROL STOK ROKOK
+# ====================================================
+def render_rekapitulasi_penjualan_report(team_name: str, target_date_str: str):
+    """Menampilkan 3 komponen laporan:
+    1. Rekap Penjualan 2 SPG & Kontrol Stok Rokok
+    2. Breakdown Penjualan Per Nama SPG Hari Ini
+    3. Rekap Stok Dibawa, Terjual 2 SPG & Sisa Stok Per Merk
+    """
+    df_all_db = load_database()
+    harga_konsumen_map = load_harga_konsumen()
+    stok_sup_map = load_stok_supervisi()
+
+    df_team_spg_today = pd.DataFrame()
+    if not df_all_db.empty and "Promotor" in df_all_db.columns:
+        df_team_spg_today = df_all_db[
+            (df_all_db["Promotor"].astype(str).str.strip().str.casefold() == str(team_name).strip().casefold())
+            & (df_all_db["Waktu"].astype(str).str.startswith(str(target_date_str).strip()))
+        ].copy()
+
+    if not df_team_spg_today.empty:
+        df_team_spg_today["Jumlah_Bungkus"] = pd.to_numeric(
+            df_team_spg_today["Jumlah_Bungkus"], errors="coerce"
+        ).fillna(0)
+        df_team_spg_today["Harga_Konsumen"] = df_team_spg_today["Brand_Rokok"].apply(
+            lambda b: get_harga_konsumen_brand(b, harga_konsumen_map)
+        )
+        df_team_spg_today["Total_Uang_Rp"] = (
+            df_team_spg_today["Jumlah_Bungkus"] * df_team_spg_today["Harga_Konsumen"]
+        ).astype(int)
+
+    all_brands_sup = load_master_brands()
+    team_brands_sup_map = load_master_team_brands()
+    team_names_sup_map = load_master_team_names()
+    allowed_brands_sup = resolve_team_allowed_brands(
+        team_name=team_name,
+        all_brands=all_brands_sup,
+        team_brands_map=team_brands_sup_map,
+        team_names_map=team_names_sup_map,
+        prefer_keyword_match=True,
+    )
+    if not allowed_brands_sup:
+        allowed_brands_sup = all_brands_sup
+
+    sold_brands_today = (
+        df_team_spg_today["Brand_Rokok"].dropna().astype(str).str.strip().unique().tolist()
+        if not df_team_spg_today.empty
+        else []
+    )
+    brand_list_sup_stok = list(
+        dict.fromkeys([b for b in allowed_brands_sup if b] + [b for b in sold_brands_today if b])
+    )
+
+    try:
+        parsed_target_date = datetime.strptime(str(target_date_str).strip(), "%Y-%m-%d").date()
+    except ValueError:
+        parsed_target_date = (datetime.utcnow() + timedelta(hours=7)).date()
+
+    locked_point_today = get_active_locked_lkk_point_today(team_name=team_name)
+    sched_spg_today = get_scheduled_personnel_for_team(
+        team_name,
+        parsed_target_date,
+        selected_kecamatan=locked_point_today["kecamatan"] if locked_point_today else "",
+    ).get("spg_all", [])
+    tx_spg_today = (
+        df_team_spg_today["Nama_SPG"].dropna().astype(str).str.strip().unique().tolist()
+        if not df_team_spg_today.empty
+        else []
+    )
+    spg_2_list = list(dict.fromkeys([s for s in sched_spg_today if s] + [s for s in tx_spg_today if s]))
+    if not spg_2_list:
+        spg_2_list = ["SPG 1", "SPG 2"]
+
+    total_bks_2spg_today = int(df_team_spg_today["Jumlah_Bungkus"].sum()) if not df_team_spg_today.empty else 0
+    total_uang_2spg_today = int(df_team_spg_today["Total_Uang_Rp"].sum()) if not df_team_spg_today.empty else 0
+
+    # --- 1. REKAP PENJUALAN 2 SPG & KONTROL STOK ROKOK ---
+    st.markdown(f"### 1️⃣ Rekap Penjualan 2 SPG & Kontrol Stok Rokok ({team_name})")
+    st.caption(
+        "Breakdown penjualan per nama SPG hari ini, input jumlah stok rokok yang dibawa oleh Supervisi, "
+        "dan perhitungan otomatis sisa stok setelah dikurangi penjualan SPG."
+    )
+
+    st.info(
+        f"💵 **Jumlah Uang Terkumpul ({target_date_str}) — Penjualan 2 SPG:** "
+        f"**Rp {total_uang_2spg_today:,}** ({total_bks_2spg_today:,} bungkus • "
+        f"SPG: {', '.join(tx_spg_today) if tx_spg_today else 'Belum ada penjualan'})"
+    )
+
+    with st.form(f"form_input_stok_supervisi_{team_name}_{target_date_str}"):
+        st.markdown("#### 📥 Input Jumlah Stok Rokok yang Dibawa (Per Merk)")
+        st.caption(f"Tanggal: **{target_date_str}** • Team: **{team_name}**")
+        stok_input_dict = {}
+        if not brand_list_sup_stok:
+            st.info("Belum ada daftar merk rokok untuk tim ini.")
+        else:
+            for idx_b, b_name in enumerate(brand_list_sup_stok):
+                existing_stok = get_stok_awal_supervisi(target_date_str, team_name, b_name, stok_sup_map)
+                col_sb1, col_sb2 = st.columns([0.6, 0.4])
+                with col_sb1:
+                    st.markdown(f"**🚬 {b_name}**")
+                    st.caption(f"Harga konsumen: Rp {get_harga_konsumen_brand(b_name, harga_konsumen_map):,} / bks")
+                with col_sb2:
+                    stok_input_dict[b_name] = st.number_input(
+                        f"Stok dibawa {b_name}",
+                        min_value=0,
+                        step=1,
+                        value=int(existing_stok),
+                        label_visibility="collapsed",
+                        key=f"inp_stok_sup_{team_name}_{target_date_str}_{idx_b}_{b_name}",
+                    )
+        btn_save_stok_sup = st.form_submit_button("💾 Simpan Stok Dibawa Supervisi", type="primary", use_container_width=True)
+        if btn_save_stok_sup:
+            for b_name, qty_val in stok_input_dict.items():
+                k_stok = _stok_sup_key(target_date_str, team_name, b_name)
+                stok_sup_map[k_stok] = int(qty_val)
+            if save_stok_supervisi(stok_sup_map):
+                st.success("✅ Jumlah stok rokok yang dibawa Supervisi berhasil disimpan!")
+                st.rerun()
+
+    st.markdown("---")
+    # --- 2. BREAKDOWN PENJUALAN PER NAMA SPG HARI INI ---
+    st.markdown("### 2️⃣ Breakdown Penjualan Per Nama SPG Hari Ini")
+    spg_cols = st.columns(min(2, len(spg_2_list)) if spg_2_list else 1)
+    for idx_s, spg_nm in enumerate(spg_2_list[:2]):
+        df_s = (
+            df_team_spg_today[
+                df_team_spg_today["Nama_SPG"].astype(str).str.strip().str.casefold() == spg_nm.strip().casefold()
+            ]
+            if not df_team_spg_today.empty
+            else pd.DataFrame()
+        )
+        bks_s = int(df_s["Jumlah_Bungkus"].sum()) if not df_s.empty else 0
+        uang_s = int(df_s["Total_Uang_Rp"].sum()) if not df_s.empty else 0
+        trx_s = int(len(df_s)) if not df_s.empty else 0
+        with spg_cols[idx_s % len(spg_cols)]:
+            st.markdown(
+                f"""
+                <div class="dashboard-card">
+                    <div>
+                        <div style="font-size:0.85rem;font-weight:700;color:#334155;">👩‍💼 {spg_nm}</div>
+                        <div class="card-value" style="margin-top:6px;">{bks_s:,} bks</div>
+                        <div class="card-subtext">Rp {uang_s:,} • {trx_s} transaksi</div>
+                    </div>
+                    <div class="card-label">Penjualan SPG #{idx_s + 1} Hari Ini</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    if not df_team_spg_today.empty:
+        df_breakdown_spg_merk = (
+            df_team_spg_today.groupby(["Nama_SPG", "Brand_Rokok"])
+            .agg(
+                Transaksi=("Nama_Konsumen", "count"),
+                Terjual_Bungkus=("Jumlah_Bungkus", "sum"),
+                Total_Uang_Rp=("Total_Uang_Rp", "sum"),
+            )
+            .reset_index()
+        )
+        df_breakdown_spg_merk["Terjual_Bungkus"] = df_breakdown_spg_merk["Terjual_Bungkus"].astype(int)
+        df_breakdown_spg_merk["Total_Uang_Rp"] = df_breakdown_spg_merk["Total_Uang_Rp"].astype(int)
+        st.dataframe(df_breakdown_spg_merk, use_container_width=True, hide_index=True)
+    else:
+        st.info("Belum ada penjualan SPG tercatat pada tanggal ini.")
+
+    st.markdown("---")
+    # --- 3. REKAP STOK DIBAWA, TERJUAL 2 SPG & SISA STOK PER MERK ---
+    st.markdown("### 3️⃣ Rekap Stok Dibawa, Terjual 2 SPG & Sisa Stok Per Merk")
+    rows_stok_rekap = []
+    for b_name in brand_list_sup_stok:
+        stok_dibawa = get_stok_awal_supervisi(target_date_str, team_name, b_name, stok_sup_map)
+        df_b = (
+            df_team_spg_today[
+                df_team_spg_today["Brand_Rokok"].astype(str).str.strip().str.casefold() == b_name.strip().casefold()
+            ]
+            if not df_team_spg_today.empty
+            else pd.DataFrame()
+        )
+        terjual_spg_b = int(df_b["Jumlah_Bungkus"].sum()) if not df_b.empty else 0
+        sisa_stok_b = stok_dibawa - terjual_spg_b
+        uang_b = int(df_b["Total_Uang_Rp"].sum()) if not df_b.empty else 0
+
+        r_detail = {"Merk_Rokok": b_name, "Stok_Dibawa": stok_dibawa}
+        for spg_nm in spg_2_list[:2]:
+            col_key = f"Terjual_{spg_nm}"
+            if not df_b.empty:
+                val_spg_b = int(
+                    df_b[df_b["Nama_SPG"].astype(str).str.strip().str.casefold() == spg_nm.strip().casefold()][
+                        "Jumlah_Bungkus"
+                    ].sum()
+                )
+            else:
+                val_spg_b = 0
+            r_detail[col_key] = val_spg_b
+
+        r_detail["Total_Terjual_SPG"] = terjual_spg_b
+        r_detail["Sisa_Stok"] = sisa_stok_b
+        r_detail["Uang_Merk_Rp"] = uang_b
+        rows_stok_rekap.append(r_detail)
+
+    if rows_stok_rekap:
+        df_stok_rekap = pd.DataFrame(rows_stok_rekap)
+        st.dataframe(df_stok_rekap, use_container_width=True, hide_index=True)
+
+        total_stok_dibawa_all = int(df_stok_rekap["Stok_Dibawa"].sum())
+        total_terjual_all = int(df_stok_rekap["Total_Terjual_SPG"].sum())
+        total_sisa_stok_all = int(df_stok_rekap["Sisa_Stok"].sum())
+        st.info(
+            f"📦 **Ringkasan Stok ({target_date_str}):** Stok Dibawa: **{total_stok_dibawa_all:,} bks** • "
+            f"Terjual 2 SPG: **{total_terjual_all:,} bks** • "
+            f"**Sisa Stok: {total_sisa_stok_all:,} bks**"
+        )
+    else:
+        st.info("Belum ada data stok atau merk untuk direkap.")
 
 
 # ====================================================
@@ -2288,7 +2481,7 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
         st.markdown("## 💰 Master Data: Harga Rokok Konsumen")
         st.caption(
             "Tambah merk baru dan atur/edit harga jual konsumen per bungkus. "
-            "Harga otomatis terhubung ke menu report Supervisi untuk menghitung jumlah uang terkumpul dari penjualan 2 orang SPG hari itu."
+            "Harga otomatis terhubung ke menu report untuk menghitung jumlah uang terkumpul dari penjualan 2 orang SPG hari itu."
         )
 
         current_brands = load_master_brands()
@@ -2874,12 +3067,12 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
             col_poly_sel, col_poly_reset = st.columns([0.78, 0.22])
             with col_poly_sel:
                 kecamatan_peta_terpilih = st.multiselect(
-    		    "Poligon Kecamatan Ditampilkan (On-Demand)",
-    		    options=opsi_kec_peta,
-    		    key="peta_filter_kecamatan_geojson",
-    		    max_selections=8,
-    		    help="Maksimal 8 kecamatan untuk performa optimal.",
-		)
+                    "Poligon Kecamatan Ditampilkan (On-Demand)",
+                    options=opsi_kec_peta,
+                    key="peta_filter_kecamatan_geojson",
+                    max_selections=8,
+                    help="Maksimal 8 kecamatan untuk performa optimal.",
+                )
             with col_poly_reset:
                 st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
                 if st.button("🔄 Reset Poligon", key="btn_reset_peta_polygon", use_container_width=True):
@@ -2953,7 +3146,7 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
                     "#EA580C", "#2563EB", "#16A34A", "#9333EA",
                     "#DB2777", "#0D9488", "#CA8A04", "#475569",
                 ]
-				
+
                 if mode_warna_titik == "Per Tanggal":
                     categories = sorted(df_filtered_map["Tanggal"].fillna("-").astype(str).unique().tolist())
                     cat_to_idx = {cat: idx % len(point_palette_rgba) for idx, cat in enumerate(categories)}
@@ -3211,23 +3404,16 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
                 .agg(Total_Omset_Team=("Jumlah_Bungkus", "sum"))
                 .reset_index()
             )
-
-            def clean_brand_team_lb(b):
-                return clean_brand_target_name(b)
-
-            df_today_lb["Brand_Rokok_Clean"] = df_today_lb["Brand_Rokok"].apply(clean_brand_team_lb)
-
+            df_today_lb["Brand_Rokok_Clean"] = df_today_lb["Brand_Rokok"].apply(clean_brand_target_name)
             df_today_lb = (
                 df_today_lb.groupby(["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Brand_Rokok_Clean"])
                 .agg(Total_Omset_Team=("Total_Omset_Team", "sum"))
                 .reset_index()
                 .rename(columns={"Brand_Rokok_Clean": "Brand_Rokok"})
             )
-
-            def get_team_target_lb(brand):
-                return get_target_for_brand(brand, "target_team", 50)
-
-            df_today_lb["Target_Team"] = df_today_lb["Brand_Rokok"].apply(get_team_target_lb)
+            df_today_lb["Target_Team"] = df_today_lb["Brand_Rokok"].apply(
+                lambda brand: get_target_for_brand(brand, "target_team", 50)
+            )
             target_hari_ini = int(df_today_lb["Target_Team"].sum())
         else:
             target_hari_ini = 100
@@ -3343,23 +3529,16 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
                 .agg(Total_Omset_Team=("Jumlah_Bungkus", "sum"), Total_Konsumen_Beli=("Nama_Konsumen", "count"))
                 .reset_index()
             )
-
-            def clean_brand_team(b):
-                return clean_brand_target_name(b)
-
-            df_team_leaderboard["Brand_Rokok_Clean"] = df_team_leaderboard["Brand_Rokok"].apply(clean_brand_team)
-
+            df_team_leaderboard["Brand_Rokok_Clean"] = df_team_leaderboard["Brand_Rokok"].apply(clean_brand_target_name)
             df_team_leaderboard = (
                 df_team_leaderboard.groupby(["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Brand_Rokok_Clean"])
                 .agg(Total_Omset_Team=("Total_Omset_Team", "sum"), Total_Konsumen_Beli=("Total_Konsumen_Beli", "sum"))
                 .reset_index()
                 .rename(columns={"Brand_Rokok_Clean": "Brand_Rokok"})
             )
-
-            def get_team_target(brand):
-                return get_target_for_brand(brand, "target_team", 50)
-
-            df_team_leaderboard["Target_Team"] = df_team_leaderboard["Brand_Rokok"].apply(get_team_target)
+            df_team_leaderboard["Target_Team"] = df_team_leaderboard["Brand_Rokok"].apply(
+                lambda brand: get_target_for_brand(brand, "target_team", 50)
+            )
             df_team_leaderboard["Status_Target_Team"] = df_team_leaderboard.apply(
                 lambda r: "Achieved" if r["Total_Omset_Team"] >= r["Target_Team"] else "Not Achieved",
                 axis=1
@@ -3407,275 +3586,6 @@ if _admin_portal_requested and not st.session_state["logged_in"] and st.session_
         else:
             st.info("Tidak ada data untuk filter Rokok Laku yang dipilih.")
 
-    # ====================================================
-    # REKAPITULASI COMBINE PER TITIK LKK
-    # ====================================================
-    st.markdown("---")
-    st.markdown("### 📊 Rekapitulasi Combine Per Titik LKK (All Team)")
-    st.caption("Titik LKK tampil setelah Supervisi menginput jumlah kontak; kontak bersifat per team di titik LKK yang sama.")
-
-    if not df_all_supervisi.empty:
-        df_all_supervisi["Waktu_Dt"] = pd.to_datetime(df_all_supervisi["Waktu"], errors="coerce")
-        df_all_supervisi["Tanggal"] = df_all_supervisi["Waktu_Dt"].dt.strftime("%d-%m-%Y")
-        df_all_supervisi = add_custom_week_columns(df_all_supervisi, "Waktu_Dt")
-        df_all_supervisi["Jumlah_Kontak_Manual"] = pd.to_numeric(df_all_supervisi["Jumlah_Kontak_Manual"], errors="coerce").fillna(0).astype(int)
-
-    weeks_spg = df_all_users["Periode_Minggu"].dropna().unique().tolist() if not df_all_users.empty else []
-    weeks_sup = df_all_supervisi["Periode_Minggu"].dropna().unique().tolist() if not df_all_supervisi.empty else []
-    all_weeks_lkk = sorted(list(set(weeks_spg + weeks_sup)), reverse=True)
-
-    dates_spg = df_all_users["Tanggal"].dropna().unique().tolist() if not df_all_users.empty else []
-    dates_sup = df_all_supervisi["Tanggal"].dropna().unique().tolist() if not df_all_supervisi.empty else []
-    all_dates_lkk = sorted(list(set(dates_spg + dates_sup)), reverse=True)
-
-    teams_spg = df_all_users["Promotor"].dropna().unique().tolist() if not df_all_users.empty else []
-    teams_sup = df_all_supervisi["Promotor"].dropna().unique().tolist() if not df_all_supervisi.empty else []
-    all_teams_lkk = sorted(list(set(teams_spg + teams_sup)))
-
-    col_lkk_f0, col_lkk_f1, col_lkk_f2 = st.columns(3)
-    with col_lkk_f0:
-        filter_lkk_week = st.multiselect("Filter Periode Minggu (Rekap LKK)", options=all_weeks_lkk, default=all_weeks_lkk, key="admin_lkk_week")
-    with col_lkk_f1:
-        filter_lkk_tgl = st.multiselect("Filter Tanggal (Rekap Titik LKK)", options=all_dates_lkk, default=all_dates_lkk, key="admin_lkk_tgl")
-    with col_lkk_f2:
-        filter_lkk_team = st.multiselect("Filter Nama Team (Rekap Titik LKK)", options=all_teams_lkk, default=all_teams_lkk, key="admin_lkk_team")
-
-    df_spg_lkk_filtered = df_all_users.copy()
-    df_sup_lkk_filtered = df_all_supervisi.copy()
-
-    if filter_lkk_week and not df_spg_lkk_filtered.empty:
-        df_spg_lkk_filtered = df_spg_lkk_filtered[df_spg_lkk_filtered["Periode_Minggu"].isin(filter_lkk_week)]
-    if filter_lkk_tgl and not df_spg_lkk_filtered.empty:
-        df_spg_lkk_filtered = df_spg_lkk_filtered[df_spg_lkk_filtered["Tanggal"].isin(filter_lkk_tgl)]
-    if filter_lkk_team and not df_spg_lkk_filtered.empty:
-        df_spg_lkk_filtered = df_spg_lkk_filtered[df_spg_lkk_filtered["Promotor"].isin(filter_lkk_team)]
-
-    if filter_lkk_week and not df_sup_lkk_filtered.empty:
-        df_sup_lkk_filtered = df_sup_lkk_filtered[df_sup_lkk_filtered["Periode_Minggu"].isin(filter_lkk_week)]
-    if filter_lkk_tgl and not df_sup_lkk_filtered.empty:
-        df_sup_lkk_filtered = df_sup_lkk_filtered[df_sup_lkk_filtered["Tanggal"].isin(filter_lkk_tgl)]
-    if filter_lkk_team and not df_sup_lkk_filtered.empty:
-        df_sup_lkk_filtered = df_sup_lkk_filtered[df_sup_lkk_filtered["Promotor"].isin(filter_lkk_team)]
-
-    df_rekap_sup_admin = pd.DataFrame(columns=["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Kecamatan", "Warkop_LKK", "Plat_Mobil_Supervisi", "Jumlah_Kontak_Manual"])
-    if not df_sup_lkk_filtered.empty:
-        df_rekap_sup_admin = (
-            df_sup_lkk_filtered.groupby(["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Kecamatan", "Warkop_LKK"])
-            .agg(
-                Plat_Mobil_Supervisi=("Plat_Mobil", lambda x: ", ".join([str(v) for v in x.dropna().unique() if str(v) != "-"])),
-                Jumlah_Kontak_Manual=("Jumlah_Kontak_Manual", "sum"),
-            )
-            .reset_index()
-        )
-
-    df_rekap_spg_admin = pd.DataFrame(columns=["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Kecamatan", "Warkop_LKK", "Alamat_Warkop", "SPG_Bertugas", "Konsumen_Beli", "Total_Omset_Bungkus"])
-    if not df_spg_lkk_filtered.empty:
-        df_rekap_spg_admin = (
-            df_spg_lkk_filtered.groupby(["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Kecamatan", "Warkop_LKK", "Alamat_Warkop"])
-            .agg(
-                SPG_Bertugas=("Nama_SPG", lambda x: ", ".join(x.dropna().unique())),
-                Konsumen_Beli=("Nama_Konsumen", "count"),
-                Total_Omset_Bungkus=("Jumlah_Bungkus", "sum"),
-            )
-            .reset_index()
-        )
-
-    if not df_rekap_sup_admin.empty:
-        if df_rekap_spg_admin.empty:
-            df_combine_admin = df_rekap_sup_admin.copy()
-            df_combine_admin["Alamat_Warkop"] = "-"
-            df_combine_admin["SPG_Bertugas"] = "-"
-            df_combine_admin["Konsumen_Beli"] = 0
-            df_combine_admin["Total_Omset_Bungkus"] = 0
-        else:
-            df_combine_admin = pd.merge(
-                df_rekap_sup_admin,
-                df_rekap_spg_admin,
-                on=["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Kecamatan", "Warkop_LKK"],
-                how="left",
-            ).fillna({
-                "Alamat_Warkop": "-",
-                "SPG_Bertugas": "-",
-                "Plat_Mobil_Supervisi": "-",
-                "Jumlah_Kontak_Manual": 0,
-                "Konsumen_Beli": 0,
-                "Total_Omset_Bungkus": 0,
-            })
-
-        df_combine_admin["Plat_Mobil_Supervisi"] = df_combine_admin["Plat_Mobil_Supervisi"].replace("", "-")
-        df_combine_admin["Jumlah_Kontak_Manual"] = df_combine_admin["Jumlah_Kontak_Manual"].astype(int)
-        df_combine_admin["Konsumen_Beli"] = df_combine_admin["Konsumen_Beli"].astype(int)
-        df_combine_admin["Total_Omset_Bungkus"] = df_combine_admin["Total_Omset_Bungkus"].astype(int)
-
-        cols_combine_order = ["Tanggal", "Periode_Minggu", "Promotor", "Plat_Mobil_Supervisi", "Kota_Kab", "Kecamatan", "Warkop_LKK", "Alamat_Warkop", "SPG_Bertugas", "Jumlah_Kontak_Manual", "Konsumen_Beli", "Total_Omset_Bungkus"]
-        df_combine_admin = df_combine_admin[[c for c in cols_combine_order if c in df_combine_admin.columns]].sort_values(by=["Tanggal", "Total_Omset_Bungkus", "Jumlah_Kontak_Manual"], ascending=[False, False, False])
-
-        st.dataframe(df_combine_admin, use_container_width=True)
-
-        output_lkk = BytesIO()
-        with pd.ExcelWriter(output_lkk, engine="openpyxl") as writer:
-            df_combine_admin.to_excel(writer, index=False, sheet_name="Rekap Combine LKK")
-            if not df_all_supervisi.empty:
-                df_all_supervisi.drop(columns=["Waktu_Dt"], errors="ignore").to_excel(writer, index=False, sheet_name="Log Kontak Supervisi")
-
-        st.download_button(
-            label="📥 Download Rekapitulasi Combine Per Titik LKK (.xlsx)",
-            data=output_lkk.getvalue(),
-            file_name=("rekap_combine_lkk_" + f"{(datetime.utcnow() + timedelta(hours=7)).strftime('%Y%m%d_%H%M%S')}.xlsx"),
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="btn_dl_combine_lkk_admin",
-        )
-    else:
-        st.info("Belum ada titik LKK yang diinput jumlah kontaknya oleh Supervisi untuk filter yang dipilih.")
-
-    with st.expander("🗑️ Menu Hapus Data Kontak Supervisi / Rekap LKK (Per Row / Hari / Minggu / All Data)", expanded=False):
-        if not df_all_supervisi.empty:
-            st.warning("⚠️ Perhatian: Menghapus log kontak Supervisi akan memengaruhi angka 'Jumlah_Kontak_Manual' pada tabel Rekapitulasi Combine Per Titik LKK di atas.")
-            tab_sup_row, tab_sup_day, tab_sup_week, tab_sup_all = st.tabs(["🔹 Hapus per Row", "📅 Hapus per Hari", "📆 Hapus per Minggu", "🚨 Hapus All Data"])
-
-            with tab_sup_row:
-                df_sup_indexed = df_all_supervisi.reset_index()
-                opsi_sup_rows = [
-                    f"ID #{row['index']} | {row['Waktu']} | {row['Promotor']} ({row['Plat_Mobil']}) - {row['Warkop_LKK']} ({row['Kecamatan']}): {int(row['Jumlah_Kontak_Manual'])} kontak"
-                    for _, row in df_sup_indexed.sort_values(by="Waktu", ascending=False).iterrows()
-                ]
-                selected_sup_rows = st.multiselect("Pilih baris log kontak Supervisi yang akan dihapus:", options=opsi_sup_rows, key="ms_del_sup_rows")
-                if st.button("🗑️ Hapus Baris Kontak Terpilih", type="primary", key="btn_del_sup_row"):
-                    if selected_sup_rows:
-                        indices_sup_drop = [int(item.split(" | ")[0].replace("ID #", "")) for item in selected_sup_rows]
-                        df_sup_clean = df_all_supervisi.drop(index=indices_sup_drop).drop(columns=["Waktu_Dt"], errors="ignore")
-                        save_supervisi_database(df_sup_clean)
-                        st.success(f"✅ Berhasil menghapus {len(indices_sup_drop)} baris data kontak Supervisi!")
-                        st.rerun()
-                    else:
-                        st.warning("Silakan pilih minimal 1 baris data terlebih dahulu.")
-
-            with tab_sup_day:
-                daftar_tgl_sup = sorted(df_all_supervisi["Tanggal"].dropna().unique().tolist(), reverse=True)
-                if daftar_tgl_sup:
-                    tgl_sup_hapus = st.selectbox("Pilih Tanggal Log Kontak Supervisi yang akan dihapus:", options=daftar_tgl_sup, key="sb_del_sup_day")
-                    jml_sup_hari = len(df_all_supervisi[df_all_supervisi["Tanggal"] == tgl_sup_hapus])
-                    st.info(f"Terdapat **{jml_sup_hari} entri kontak Supervisi** pada tanggal **{tgl_sup_hapus}**.")
-                    if st.button(f"🗑️ Hapus Data Kontak Tanggal {tgl_sup_hapus}", type="primary", key="btn_del_sup_day"):
-                        df_sup_clean = df_all_supervisi[df_all_supervisi["Tanggal"] != tgl_sup_hapus].drop(columns=["Waktu_Dt"], errors="ignore")
-                        save_supervisi_database(df_sup_clean)
-                        st.success(f"✅ Seluruh data kontak Supervisi ({jml_sup_hari} baris) pada tanggal {tgl_sup_hapus} berhasil dihapus!")
-                        st.rerun()
-                else:
-                    st.info("Tidak ada data tanggal valid untuk dihapus.")
-
-            with tab_sup_week:
-                daftar_minggu_sup = sorted(df_all_supervisi["Periode_Minggu"].dropna().unique().tolist(), reverse=True)
-                if daftar_minggu_sup:
-                    pilih_sup_minggu_label = st.selectbox("Pilih Periode Minggu Log Kontak Supervisi yang akan dihapus:", options=daftar_minggu_sup, key="sb_del_sup_week")
-                    jml_sup_minggu = len(df_all_supervisi[df_all_supervisi["Periode_Minggu"] == pilih_sup_minggu_label])
-                    st.info(f"Terdapat **{jml_sup_minggu} entri kontak** pada periode minggu `{pilih_sup_minggu_label}`.")
-                    if st.button("🗑️ Hapus Data Kontak Minggu Terpilih", type="primary", key="btn_del_sup_week"):
-                        df_sup_clean = df_all_supervisi[df_all_supervisi["Periode_Minggu"] != pilih_sup_minggu_label].drop(columns=["Waktu_Dt"], errors="ignore")
-                        save_supervisi_database(df_sup_clean)
-                        st.success(f"✅ Data kontak Supervisi pada periode {pilih_sup_minggu_label} berhasil dihapus!")
-                        st.rerun()
-                else:
-                    st.info("Tidak ada data minggu valid untuk pengelompokan mingguan.")
-
-            with tab_sup_all:
-                st.error(f"🚨 Tindakan ini akan menghapus **SELURUH ({len(df_all_supervisi)} baris)** log kontak Supervisi secara permanen!")
-                konfirmasi_hapus_sup_all = st.checkbox("Izin konfirmasi hapus seluruh data kontak Supervisi.", key="chk_del_sup_all")
-                if st.button("🔥 KOSONGKAN SEMUA DATA KONTAK SUPERVISI", type="primary", key="btn_del_sup_all"):
-                    if konfirmasi_hapus_sup_all:
-                        df_sup_empty = pd.DataFrame(columns=EXPECTED_SUPERVISI_COLUMNS)
-                        save_supervisi_database(df_sup_empty)
-                        st.success("✅ Seluruh database kontak Supervisi telah dikosongkan!")
-                        st.rerun()
-                    else:
-                        st.warning("Centang kotak konfirmasi terlebih dahulu sebelum menghapus seluruh data.")
-
-            st.markdown("##### 📋 Preview Log Input Kontak Manual Supervisi")
-            st.dataframe(df_all_supervisi.drop(columns=["Waktu_Dt"], errors="ignore").sort_values(by="Waktu", ascending=False), use_container_width=True)
-        else:
-            st.info("Belum ada data log input kontak manual dari Supervisi.")
-
-    if not df_all_users.empty:
-        st.markdown("---")
-        st.markdown("#### 📑 Log Detail Transaksi All User (SPG)")
-
-        with st.expander("✏️ Menu Edit & 🗑️ Hapus Log Detail Transaksi SPG", expanded=False):
-            st.warning("⚠️ Anda dapat melakukan koreksi/edit langsung pada sel tabel di bawah ini, atau menggunakan menu hapus data.")
-            tab_edit_table, tab_del_row, tab_del_day, tab_del_week, tab_del_all = st.tabs(["✏️ Edit Langsung Tabel", "🔹 Hapus per Row", "📅 Hapus per Hari", "📆 Hapus per Minggu", "🚨 Hapus All Data"])
-
-            with tab_edit_table:
-                st.markdown("##### Edit Data Transaksi Langsung pada Tabel")
-                st.caption("Klik dua kali pada sel yang ingin diubah, lalu klik tombol Simpan Perubahan di bawah.")
-                edited_transaksi_df = st.data_editor(df_all_users.drop(columns=["Waktu_Dt", "Tanggal", "Periode_Minggu"], errors="ignore"), num_rows="dynamic", use_container_width=True, key="editor_log_transaksi_all")
-
-                if st.button("💾 Simpan Perubahan Edit Transaksi", type="primary", key="btn_save_edit_transaksi"):
-                    for col in EXPECTED_COLUMNS:
-                        if col not in edited_transaksi_df.columns:
-                            edited_transaksi_df[col] = "-"
-                    df_final_saved = edited_transaksi_df[EXPECTED_COLUMNS]
-                    save_database(df_final_saved)
-                    st.success("✅ Perubahan log detail transaksi berhasil disimpan!")
-                    st.rerun()
-
-            with tab_del_row:
-                df_indexed = df_all_users.reset_index()
-                opsi_rows = [
-                    f"ID #{row['index']} | {row['Waktu']} | {row['Promotor']} ({row['Nama_SPG']}) - {row['Nama_Konsumen']} ({row['Brand_Rokok']}: {int(row['Jumlah_Bungkus'])} bks)"
-                    for _, row in df_indexed.sort_values(by="Waktu", ascending=False).iterrows()
-                ]
-                selected_rows = st.multiselect("Pilih baris transaksi yang akan dihapus:", options=opsi_rows, key="ms_del_rows")
-                if st.button("🗑️ Hapus Baris Terpilih", type="primary", key="btn_del_row"):
-                    if selected_rows:
-                        indices_to_drop = [int(item.split(" | ")[0].replace("ID #", "")) for item in selected_rows]
-                        df_clean = df_all_users.drop(index=indices_to_drop).drop(columns=["Waktu_Dt", "Tanggal", "Periode_Minggu", "Bulan_Tahun"], errors="ignore")
-                        save_database(df_clean)
-                        st.success(f"✅ Berhasil menghapus {len(indices_to_drop)} baris transaksi!")
-                        st.rerun()
-                    else:
-                        st.warning("Silakan pilih minimal 1 baris transaksi terlebih dahulu.")
-
-            with tab_del_day:
-                daftar_tanggal = sorted(df_all_users["Tanggal"].dropna().unique().tolist(), reverse=True)
-                if daftar_tanggal:
-                    tgl_hapus = st.selectbox("Pilih Tanggal Transaksi yang akan dihapus:", options=daftar_tanggal, key="sb_del_day")
-                    jml_data_hari = len(df_all_users[df_all_users["Tanggal"] == tgl_hapus])
-                    st.info(f"Terdapat **{jml_data_hari} transaksi** pada tanggal **{tgl_hapus}**.")
-                    if st.button(f"🗑️ Hapus Semua Data Tanggal {tgl_hapus}", type="primary", key="btn_del_day"):
-                        df_clean = df_all_users[df_all_users["Tanggal"] != tgl_hapus].drop(columns=["Waktu_Dt", "Tanggal", "Periode_Minggu", "Bulan_Tahun"], errors="ignore")
-                        save_database(df_clean)
-                        st.success(f"✅ Seluruh data ({jml_data_hari} baris) pada tanggal {tgl_hapus} berhasil dihapus!")
-                        st.rerun()
-                else:
-                    st.info("Tidak ada data tanggal valid untuk dihapus.")
-
-            with tab_del_week:
-                daftar_minggu_spg = sorted(df_all_users["Periode_Minggu"].dropna().unique().tolist(), reverse=True)
-                if daftar_minggu_spg:
-                    pilih_minggu_label = st.selectbox("Pilih Periode Minggu Transaksi yang akan dihapus:", options=daftar_minggu_spg, key="sb_del_week")
-                    jml_trans_minggu = len(df_all_users[df_all_users["Periode_Minggu"] == pilih_minggu_label])
-                    st.info(f"Terdapat **{jml_trans_minggu} transaksi** pada periode minggu `{pilih_minggu_label}`.")
-                    if st.button("🗑️ Hapus Semua Data Minggu Terpilih", type="primary", key="btn_del_week"):
-                        df_clean = df_all_users[df_all_users["Periode_Minggu"] != pilih_minggu_label].drop(columns=["Waktu_Dt", "Tanggal", "Periode_Minggu", "Bulan_Tahun"], errors="ignore")
-                        save_database(df_clean)
-                        st.success(f"✅ Data pada periode minggu `{pilih_minggu_label}` berhasil dihapus!")
-                        st.rerun()
-                else:
-                    st.info("Tidak ada data minggu valid untuk pengelompokan mingguan.")
-
-            with tab_del_all:
-                st.error(f"🚨 Tindakan ini akan menghapus **SELURUH ({len(df_all_users)} baris)** data transaksi dari database secara permanen!")
-                konfirmasi_hapus_all = st.checkbox("Izin konfirmasi hapus seluruh data transaksi.", key="chk_del_all")
-                if st.button("🔥 KOSONGKAN SEMUA DATA TRANSAKSI", type="primary", key="btn_del_all"):
-                    if konfirmasi_hapus_all:
-                        df_empty = pd.DataFrame(columns=EXPECTED_COLUMNS)
-                        save_database(df_empty)
-                        st.success("✅ Seluruh database transaksi telah dikosongkan!")
-                        st.rerun()
-                    else:
-                        st.warning("Centang kotak konfirmasi terlebih dahulu sebelum menghapus seluruh data.")
-
-        st.dataframe(df_all_users.drop(columns=["Waktu_Dt"], errors="ignore").sort_values(by="Waktu", ascending=False), use_container_width=True)
-
     st.stop()
 
 # ====================================================
@@ -3706,7 +3616,7 @@ if _admin_portal_requested and not st.session_state["logged_in"] and not st.sess
     st.stop()
 
 # ====================================================
-# HALAMAN LOGIN UTAMA (SPG & SUPERVISI LAPANGAN)
+# HALAMAN LOGIN UTAMA (SPG, SUPERVISI & REKAPITULASI PENJUALAN)
 # ====================================================
 if not st.session_state["logged_in"]:
     st.markdown(
@@ -3742,21 +3652,58 @@ if not st.session_state["logged_in"]:
 
     with col_btn_mode3:
         if st.button(
-            "Rekapitulasi Penjualan",
+            "📊 Rekapitulasi Penjualan",
             use_container_width=True,
-            type="primary" if st.session_state["login_mode"] == "Supervisi" else "secondary",
+            type="primary" if st.session_state["login_mode"] == "Rekapitulasi" else "secondary",
         ):
             st.session_state["login_mode"] = "Rekapitulasi"
             st.rerun()
 
+    team_name_mapping = load_master_team_names()
+    list_team = [
+        team_name_mapping[f"Team SPG {i}"]
+        for i in range(1, 21)
+        if team_name_mapping[f"Team SPG {i}"]
+    ]
+
+    # Jika pengguna klik tombol Rekapitulasi Penjualan -> langsung tampilkan 3 laporan rekap & stok
+    if st.session_state["login_mode"] == "Rekapitulasi":
+        st.markdown('<div class="section-title">2️⃣ Pilih Tim &amp; Tanggal Rekapitulasi</div>', unsafe_allow_html=True)
+        with st.container(border=True):
+            today_wib_rek = (datetime.utcnow() + timedelta(hours=7)).date()
+            c_rek1, c_rek2 = st.columns([0.65, 0.35])
+            with c_rek1:
+                pilihan_user_rek = st.selectbox(
+                    "👤 Nama Team Operasional",
+                    list_team,
+                    key="selected_team_rekapitulasi",
+                )
+            with c_rek2:
+                tgl_rekap_input = st.date_input(
+                    "📅 Tanggal Laporan",
+                    value=today_wib_rek,
+                    key="selected_date_rekapitulasi",
+                )
+
+        apply_team_theme_css(pilihan_user_rek)
+        st.markdown("---")
+        render_rekapitulasi_penjualan_report(
+            team_name=pilihan_user_rek,
+            target_date_str=tgl_rekap_input.strftime("%Y-%m-%d"),
+        )
+
+        st.markdown(
+            """
+            <div class="footer-note">
+                © 2026 Tumarso Monitoring System
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.stop()
+
     st.markdown('<div class="section-title">2️⃣ Pilih Tim &amp; Verifikasi Jadwal</div>', unsafe_allow_html=True)
     with st.container(border=True):
-        team_name_mapping = load_master_team_names()
-        list_team = [
-            team_name_mapping[f"Team SPG {i}"]
-            for i in range(1, 21)
-            if team_name_mapping[f"Team SPG {i}"]
-        ]
         pilihan_user = st.selectbox(
             "👤 Nama Team Operasional",
             list_team,
@@ -4307,172 +4254,10 @@ if st.session_state["login_mode"] == "Supervisi":
         st.info("Titik LKK akan tampil di rekap setelah Supervisi menginput jumlah kontak.")
 
     st.markdown("---")
-    st.markdown(f"### 📦 Rekap Penjualan 2 SPG & Kontrol Stok Rokok ({st.session_state['user_spg']})")
-    st.caption(
-        "Breakdown penjualan per nama SPG hari ini, input jumlah stok rokok yang dibawa oleh Supervisi, "
-        "dan perhitungan otomatis sisa stok setelah dikurangi penjualan SPG."
-    )
-
-    all_brands_sup = load_master_brands()
-    team_brands_sup_map = load_master_team_brands()
-    team_names_sup_map = load_master_team_names()
-    allowed_brands_sup = resolve_team_allowed_brands(
+    render_rekapitulasi_penjualan_report(
         team_name=st.session_state["user_spg"],
-        all_brands=all_brands_sup,
-        team_brands_map=team_brands_sup_map,
-        team_names_map=team_names_sup_map,
-        prefer_keyword_match=True,
+        target_date_str=today_str_sup,
     )
-    if not allowed_brands_sup:
-        allowed_brands_sup = all_brands_sup
-
-    sold_brands_today = (
-        df_team_spg_today["Brand_Rokok"].dropna().astype(str).str.strip().unique().tolist()
-        if not df_team_spg_today.empty
-        else []
-    )
-    brand_list_sup_stok = list(
-        dict.fromkeys([b for b in allowed_brands_sup if b] + [b for b in sold_brands_today if b])
-    )
-
-    sched_spg_today = get_scheduled_personnel_for_team(
-        st.session_state["user_spg"],
-        (datetime.utcnow() + timedelta(hours=7)).date(),
-        selected_kecamatan=locked_point_today["kecamatan"] if locked_point_today else st.session_state.get("sektor_terjadwal_login", ""),
-    ).get("spg_all", [])
-    tx_spg_today = (
-        df_team_spg_today["Nama_SPG"].dropna().astype(str).str.strip().unique().tolist()
-        if not df_team_spg_today.empty
-        else []
-    )
-    spg_2_list = list(dict.fromkeys([s for s in sched_spg_today if s] + [s for s in tx_spg_today if s]))
-    if not spg_2_list:
-        spg_2_list = ["SPG 1", "SPG 2"]
-
-    stok_sup_map = load_stok_supervisi()
-
-    with st.form("form_input_stok_supervisi_hari_ini"):
-        st.markdown("#### 📥 Input Jumlah Stok Rokok yang Dibawa (Per Merk)")
-        st.caption(f"Tanggal: **{today_str_sup}** • Team: **{st.session_state['user_spg']}**")
-        stok_input_dict = {}
-        if not brand_list_sup_stok:
-            st.info("Belum ada daftar merk rokok untuk tim ini.")
-        else:
-            for idx_b, b_name in enumerate(brand_list_sup_stok):
-                existing_stok = get_stok_awal_supervisi(today_str_sup, st.session_state["user_spg"], b_name, stok_sup_map)
-                col_sb1, col_sb2 = st.columns([0.6, 0.4])
-                with col_sb1:
-                    st.markdown(f"**🚬 {b_name}**")
-                    st.caption(f"Harga konsumen: Rp {get_harga_konsumen_brand(b_name, harga_konsumen_map):,} / bks")
-                with col_sb2:
-                    stok_input_dict[b_name] = st.number_input(
-                        f"Stok dibawa {b_name}",
-                        min_value=0,
-                        step=1,
-                        value=int(existing_stok),
-                        label_visibility="collapsed",
-                        key=f"inp_stok_sup_{today_str_sup}_{idx_b}_{b_name}",
-                    )
-        btn_save_stok_sup = st.form_submit_button("💾 Simpan Stok Dibawa Supervisi", type="primary", use_container_width=True)
-        if btn_save_stok_sup:
-            for b_name, qty_val in stok_input_dict.items():
-                k_stok = _stok_sup_key(today_str_sup, st.session_state["user_spg"], b_name)
-                stok_sup_map[k_stok] = int(qty_val)
-            if save_stok_supervisi(stok_sup_map):
-                st.success("✅ Jumlah stok rokok yang dibawa Supervisi berhasil disimpan!")
-                st.rerun()
-
-    st.markdown("#### 👩‍💼 Breakdown Penjualan Per Nama SPG Hari Ini")
-    spg_cols = st.columns(min(2, len(spg_2_list)) if spg_2_list else 1)
-    for idx_s, spg_nm in enumerate(spg_2_list[:2]):
-        df_s = (
-            df_team_spg_today[
-                df_team_spg_today["Nama_SPG"].astype(str).str.strip().str.casefold() == spg_nm.strip().casefold()
-            ]
-            if not df_team_spg_today.empty
-            else pd.DataFrame()
-        )
-        bks_s = int(df_s["Jumlah_Bungkus"].sum()) if not df_s.empty else 0
-        uang_s = int(df_s["Total_Uang_Rp"].sum()) if not df_s.empty else 0
-        trx_s = int(len(df_s)) if not df_s.empty else 0
-        with spg_cols[idx_s % len(spg_cols)]:
-            st.markdown(
-                f"""
-                <div class="dashboard-card">
-                    <div>
-                        <div style="font-size:0.85rem;font-weight:700;color:#334155;">👩‍💼 {spg_nm}</div>
-                        <div class="card-value" style="margin-top:6px;">{bks_s:,} bks</div>
-                        <div class="card-subtext">Rp {uang_s:,} • {trx_s} transaksi</div>
-                    </div>
-                    <div class="card-label">Penjualan SPG #{idx_s + 1} Hari Ini</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    if not df_team_spg_today.empty:
-        df_breakdown_spg_merk = (
-            df_team_spg_today.groupby(["Nama_SPG", "Brand_Rokok"])
-            .agg(
-                Transaksi=("Nama_Konsumen", "count"),
-                Terjual_Bungkus=("Jumlah_Bungkus", "sum"),
-                Total_Uang_Rp=("Total_Uang_Rp", "sum"),
-            )
-            .reset_index()
-        )
-        df_breakdown_spg_merk["Terjual_Bungkus"] = df_breakdown_spg_merk["Terjual_Bungkus"].astype(int)
-        df_breakdown_spg_merk["Total_Uang_Rp"] = df_breakdown_spg_merk["Total_Uang_Rp"].astype(int)
-        st.dataframe(df_breakdown_spg_merk, use_container_width=True, hide_index=True)
-    else:
-        st.info("Belum ada penjualan SPG tercatat hari ini.")
-
-    st.markdown("#### 📊 Rekap Stok Dibawa, Terjual 2 SPG & Sisa Stok Per Merk")
-    rows_stok_rekap = []
-    for b_name in brand_list_sup_stok:
-        stok_dibawa = get_stok_awal_supervisi(today_str_sup, st.session_state["user_spg"], b_name, stok_sup_map)
-        df_b = (
-            df_team_spg_today[
-                df_team_spg_today["Brand_Rokok"].astype(str).str.strip().str.casefold() == b_name.strip().casefold()
-            ]
-            if not df_team_spg_today.empty
-            else pd.DataFrame()
-        )
-        terjual_spg_b = int(df_b["Jumlah_Bungkus"].sum()) if not df_b.empty else 0
-        sisa_stok_b = stok_dibawa - terjual_spg_b
-        uang_b = int(df_b["Total_Uang_Rp"].sum()) if not df_b.empty else 0
-
-        r_detail = {"Merk_Rokok": b_name, "Stok_Dibawa": stok_dibawa}
-        for spg_nm in spg_2_list[:2]:
-            col_key = f"Terjual_{spg_nm}"
-            if not df_b.empty:
-                val_spg_b = int(
-                    df_b[df_b["Nama_SPG"].astype(str).str.strip().str.casefold() == spg_nm.strip().casefold()][
-                        "Jumlah_Bungkus"
-                    ].sum()
-                )
-            else:
-                val_spg_b = 0
-            r_detail[col_key] = val_spg_b
-
-        r_detail["Total_Terjual_SPG"] = terjual_spg_b
-        r_detail["Sisa_Stok"] = sisa_stok_b
-        r_detail["Uang_Merk_Rp"] = uang_b
-        rows_stok_rekap.append(r_detail)
-
-    if rows_stok_rekap:
-        df_stok_rekap = pd.DataFrame(rows_stok_rekap)
-        st.dataframe(df_stok_rekap, use_container_width=True, hide_index=True)
-
-        total_stok_dibawa_all = int(df_stok_rekap["Stok_Dibawa"].sum())
-        total_terjual_all = int(df_stok_rekap["Total_Terjual_SPG"].sum())
-        total_sisa_stok_all = int(df_stok_rekap["Sisa_Stok"].sum())
-        st.info(
-            f"📦 **Ringkasan Stok Hari Ini:** Stok Dibawa: **{total_stok_dibawa_all:,} bks** • "
-            f"Terjual 2 SPG: **{total_terjual_all:,} bks** • "
-            f"**Sisa Stok: {total_sisa_stok_all:,} bks**"
-        )
-    else:
-        st.info("Belum ada data stok atau merk untuk direkap.")
 
     st.markdown("#### 📑 Log Detail Konsumen Beli (SPG) di Warkop Ini")
     if not df_lkk_active_spg.empty:
@@ -4809,11 +4594,7 @@ if not df_user_rekap.empty:
         .reset_index()
     )
 
-    def clean_brand_spg(b):
-        return clean_brand_target_name(b)
-
-    df_eval_spg["Brand_Rokok_Clean"] = df_eval_spg["Brand_Rokok"].apply(clean_brand_spg)
-
+    df_eval_spg["Brand_Rokok_Clean"] = df_eval_spg["Brand_Rokok"].apply(clean_brand_target_name)
     df_eval_spg = (
         df_eval_spg.groupby(["Tanggal", "Periode_Minggu", "Nama_SPG", "Brand_Rokok_Clean"])
         .agg(
@@ -4828,11 +4609,9 @@ if not df_user_rekap.empty:
     df_eval_spg["Kontak_Supervisi_Team"] = df_eval_spg["Tanggal"].map(
         lambda t: int(team_contact_by_date.get(t, 0))
     )
-
-    def get_spg_target(brand):
-        return get_target_for_brand(brand, "target_spg", 25)
-
-    df_eval_spg["Target_SPG"] = df_eval_spg["Brand_Rokok"].apply(get_spg_target)
+    df_eval_spg["Target_SPG"] = df_eval_spg["Brand_Rokok"].apply(
+        lambda brand: get_target_for_brand(brand, "target_spg", 25)
+    )
     df_eval_spg["Status_Target_SPG"] = df_eval_spg.apply(
         lambda r: "Achieved" if r["Jumlah_Omset_SPG"] >= r["Target_SPG"] else "Not Achieved",
         axis=1
