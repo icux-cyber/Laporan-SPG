@@ -41,14 +41,19 @@ from team_brand_sync import (
 # ====================================================
 # KONFIGURASI HALAMAN STREAMLIT
 # ====================================================
+_is_admin_mode_init = (
+    str(st.query_params.get("page", "")).strip().lower() == "admin"
+    or bool(st.session_state.get("admin_logged_in"))
+)
+
 st.set_page_config(
     page_title="Laporan Dirsell SPG",
     page_icon="📍",
-    layout="centered",
-    initial_sidebar_state="collapsed",
+    layout="wide" if _is_admin_mode_init else "centered",
+    initial_sidebar_state="expanded" if _is_admin_mode_init else "collapsed",
 )
 
-if str(st.query_params.get("page", "")).strip().lower() != "admin":
+if not _is_admin_mode_init:
     st.markdown(
         """
         <style>
@@ -56,6 +61,22 @@ if str(st.query_params.get("page", "")).strip().lower() != "admin":
         [data-testid="stSidebarNav"],
         [data-testid="collapsedControl"] {
             display: none !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+else:
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebar"] {
+            display: block !important;
+            visibility: visible !important;
+        }
+        [data-testid="collapsedControl"] {
+            display: flex !important;
+            visibility: visible !important;
         }
         </style>
         """,
@@ -2149,6 +2170,35 @@ if _admin_portal_requested and not st.session_state["logged_in"] and not st.sess
     st.stop()
 
 if st.session_state.get("admin_logged_in"):
+    with st.sidebar:
+        st.markdown("### 🛠️ Navigasi Panel Admin")
+        st.caption("Kelola data master, jadwal, warkop, brand/harga & backup.")
+        st.markdown("---")
+
+        admin_menu_items = [
+            ("Dashboard", "📊 Dashboard"),
+            ("Jadwal", "🗓️ Jadwal & Tim"),
+            ("Lokasi", "📍 Warkop & Peta"),
+            ("Brand", "🚬 Brand & Harga"),
+        ]
+        for view_key, view_label in admin_menu_items:
+            is_active = st.session_state.get("admin_view", "Dashboard") == view_key
+            if st.button(
+                view_label,
+                use_container_width=True,
+                type="primary" if is_active else "secondary",
+                key=f"adm_sidebar_nav_{view_key}",
+            ):
+                st.session_state["admin_view"] = view_key
+                st.rerun()
+
+        st.markdown("---")
+        render_google_sheet_backup_controls()
+        st.markdown("---")
+        if st.button("🚪 Keluar Admin", use_container_width=True, key="adm_sidebar_btn_logout"):
+            st.session_state["admin_logged_in"] = False
+            st.rerun()
+
     st.markdown(
         """
         <div class="user-banner">
@@ -2157,36 +2207,12 @@ if st.session_state.get("admin_logged_in"):
                 <span class="badge-mode">Admin Aktif</span>
             </div>
             <div class="user-banner-sub">
-                Pengelolaan Jadwal, Master Lokasi/Warkop, Master Brand/Target/Harga, &amp; Rekap Penjualan Harian
+                Pengelolaan Jadwal, Master Lokasi/Warkop, Master Brand/Target/Harga, &amp; Backup Data
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-    col_adm_nav1, col_adm_nav2, col_adm_nav3, col_adm_nav4, col_adm_logout = st.columns([1.2, 1.3, 1.3, 1.3, 0.9])
-    with col_adm_nav1:
-        if st.button("📊 Dashboard", use_container_width=True, type="primary" if st.session_state["admin_view"] == "Dashboard" else "secondary", key="adm_tab_dash"):
-            st.session_state["admin_view"] = "Dashboard"
-            st.rerun()
-    with col_adm_nav2:
-        if st.button("🗓️ Jadwal & Tim", use_container_width=True, type="primary" if st.session_state["admin_view"] == "Jadwal" else "secondary", key="adm_tab_jdw"):
-            st.session_state["admin_view"] = "Jadwal"
-            st.rerun()
-    with col_adm_nav3:
-        if st.button("📍 Warkop & Peta", use_container_width=True, type="primary" if st.session_state["admin_view"] == "Lokasi" else "secondary", key="adm_tab_lok"):
-            st.session_state["admin_view"] = "Lokasi"
-            st.rerun()
-    with col_adm_nav4:
-        if st.button("🚬 Brand & Harga", use_container_width=True, type="primary" if st.session_state["admin_view"] == "Brand" else "secondary", key="adm_tab_brd"):
-            st.session_state["admin_view"] = "Brand"
-            st.rerun()
-    with col_adm_logout:
-        if st.button("🚪 Keluar", use_container_width=True, key="adm_btn_logout"):
-            st.session_state["admin_logged_in"] = False
-            st.rerun()
-
-    render_google_sheet_backup_controls()
 
     adm_view = st.session_state.get("admin_view", "Dashboard")
     df_db_adm = load_database()
