@@ -2148,6 +2148,211 @@ if _admin_portal_requested and not st.session_state["logged_in"] and not st.sess
                     st.error("❌ Kata sandi admin salah!")
     st.stop()
 
+if st.session_state.get("admin_logged_in"):
+    st.markdown(
+        """
+        <div class="user-banner">
+            <div class="user-banner-title">
+                <span>🛠️ PORTAL ADMIN &amp; MONITORING</span>
+                <span class="badge-mode">Admin Aktif</span>
+            </div>
+            <div class="user-banner-sub">
+                Pengelolaan Jadwal, Master Lokasi/Warkop, Master Brand/Target/Harga, &amp; Rekap Penjualan Harian
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    col_adm_nav1, col_adm_nav2, col_adm_nav3, col_adm_nav4, col_adm_logout = st.columns([1.2, 1.3, 1.3, 1.3, 0.9])
+    with col_adm_nav1:
+        if st.button("📊 Dashboard", use_container_width=True, type="primary" if st.session_state["admin_view"] == "Dashboard" else "secondary", key="adm_tab_dash"):
+            st.session_state["admin_view"] = "Dashboard"
+            st.rerun()
+    with col_adm_nav2:
+        if st.button("🗓️ Jadwal & Tim", use_container_width=True, type="primary" if st.session_state["admin_view"] == "Jadwal" else "secondary", key="adm_tab_jdw"):
+            st.session_state["admin_view"] = "Jadwal"
+            st.rerun()
+    with col_adm_nav3:
+        if st.button("📍 Warkop & Peta", use_container_width=True, type="primary" if st.session_state["admin_view"] == "Lokasi" else "secondary", key="adm_tab_lok"):
+            st.session_state["admin_view"] = "Lokasi"
+            st.rerun()
+    with col_adm_nav4:
+        if st.button("🚬 Brand & Harga", use_container_width=True, type="primary" if st.session_state["admin_view"] == "Brand" else "secondary", key="adm_tab_brd"):
+            st.session_state["admin_view"] = "Brand"
+            st.rerun()
+    with col_adm_logout:
+        if st.button("🚪 Keluar", use_container_width=True, key="adm_btn_logout"):
+            st.session_state["admin_logged_in"] = False
+            st.rerun()
+
+    render_google_sheet_backup_controls()
+
+    adm_view = st.session_state.get("admin_view", "Dashboard")
+    df_db_adm = load_database()
+    df_sup_adm = load_supervisi_database()
+
+    if adm_view == "Dashboard":
+        st.markdown("### 📊 Ringkasan Data Transaksi & Supervisi")
+        total_tx = len(df_db_adm) if not df_db_adm.empty else 0
+        total_bks = int(pd.to_numeric(df_db_adm["Jumlah_Bungkus"], errors="coerce").fillna(0).sum()) if not df_db_adm.empty else 0
+        total_kontak_sup = int(pd.to_numeric(df_sup_adm["Jumlah_Kontak_Manual"], errors="coerce").fillna(0).sum()) if not df_sup_adm.empty else 0
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown(f'<div class="dashboard-card"><div class="card-value">{total_tx:,}</div><div class="card-label">Total Transaksi SPG</div></div>', unsafe_allow_html=True)
+        with c2:
+            st.markdown(f'<div class="dashboard-card"><div class="card-value-green">{total_bks:,}</div><div class="card-label">Total Bungkus Terjual</div></div>', unsafe_allow_html=True)
+        with c3:
+            st.markdown(f'<div class="dashboard-card"><div class="card-value">{total_kontak_sup:,}</div><div class="card-label">Total Kontak Supervisi</div></div>', unsafe_allow_html=True)
+
+        st.markdown("#### 📑 Data Laporan SPG")
+        if not df_db_adm.empty:
+            st.dataframe(df_db_adm, use_container_width=True)
+        else:
+            st.info("Belum ada data laporan SPG.")
+
+        st.markdown("#### 📑 Data Kontak Supervisi")
+        if not df_sup_adm.empty:
+            st.dataframe(df_sup_adm, use_container_width=True)
+        else:
+            st.info("Belum ada data kontak Supervisi.")
+
+    elif adm_view == "Jadwal":
+        st.markdown("### 🗓️ Pengaturan Jadwal SPG & Nama Team")
+        with st.expander("📅 Input / Edit Detail Jadwal Harian (Personel & Kendaraan)", expanded=True):
+            render_schedule_entry()
+
+        df_jdw_curr = load_jadwal_spg()
+        st.markdown("#### 📄 Tabel Jadwal SPG (`Jadwal SPG.xlsx`)")
+        if not df_jdw_curr.empty:
+            edited_jdw = st.data_editor(df_jdw_curr, use_container_width=True, num_rows="dynamic", key="adm_jdw_editor")
+            if st.button("💾 Simpan Jadwal SPG", type="primary", key="adm_btn_save_jdw"):
+                if save_jadwal_spg(edited_jdw):
+                    st.cache_data.clear()
+                    st.success("✅ Jadwal SPG berhasil disimpan!")
+                    st.rerun()
+        else:
+            st.info("File `Jadwal SPG.xlsx` belum tersedia atau kosong.")
+
+        team_map_curr = load_master_team_names()
+        with st.form("form_master_team_names_admin"):
+            st.markdown("#### 🏷️ Master Nama Team (1 - 20)")
+            updated_team_map = {}
+            for i in range(1, 21):
+                key_t = f"Team SPG {i}"
+                updated_team_map[key_t] = st.text_input(
+                    key_t,
+                    value=team_map_curr.get(key_t, key_t),
+                    key=f"adm_tname_{i}",
+                )
+            if st.form_submit_button("💾 Simpan Nama Team", type="primary", use_container_width=True):
+                if save_master_team_names(updated_team_map):
+                    st.success("✅ Master Nama Team berhasil disimpan!")
+                    st.rerun()
+
+    elif adm_view == "Lokasi":
+        st.markdown("### 📍 Master Lokasi Warkop / LKK & Status Kunjungan")
+        df_lok_curr = load_master_lokasi_excel()
+        status_map_curr = load_warkop_visit_status_map()
+        df_lok_status = build_warkop_status_dataframe(df_lok_curr, status_map_curr)
+
+        edited_lok = st.data_editor(
+            df_lok_status,
+            use_container_width=True,
+            num_rows="dynamic",
+            column_config={
+                "Status Kunjungan": st.column_config.SelectboxColumn(
+                    "Status Kunjungan",
+                    options=VISIT_STATUS_OPTIONS,
+                    required=True,
+                )
+            },
+            key="adm_lok_editor",
+        )
+        if st.button("💾 Simpan Master Lokasi & Status Kunjungan", type="primary", key="adm_btn_save_lok"):
+            new_status_map = {}
+            for _, r_lok in edited_lok.iterrows():
+                k_w = _warkop_status_key(
+                    r_lok.get("Kota", "Surabaya"),
+                    r_lok.get("Kecamatan", ""),
+                    r_lok.get("Nama Warkop / LKK", ""),
+                )
+                if str(r_lok.get("Nama Warkop / LKK", "")).strip():
+                    new_status_map[k_w] = str(r_lok.get("Status Kunjungan", VISIT_STATUS_WAJIB)).strip()
+            save_warkop_visit_status_map(new_status_map)
+            df_to_save_lok = edited_lok[["Kota", "Kecamatan", "Nama Warkop / LKK", "Alamat Warkop / LKK"]].copy()
+            if save_master_lokasi_excel(df_to_save_lok):
+                st.cache_data.clear()
+                st.success("✅ Master Lokasi & Status Kunjungan berhasil disimpan!")
+                st.rerun()
+
+    elif adm_view == "Brand":
+        st.markdown("### 🚬 Master Brand Rokok, Target & Harga Konsumen")
+        brands_curr = load_master_brands()
+        harga_curr = load_harga_konsumen()
+        targets_curr = load_target_rules()
+
+        with st.form("form_master_brand_harga_admin"):
+            st.markdown("#### 📋 Daftar Brand Rokok")
+            brands_text = st.text_area(
+                "Satu merk rokok per baris",
+                value="\n".join(brands_curr),
+                height=160,
+                key="adm_brands_textarea",
+            )
+
+            st.markdown("#### 💵 Harga Konsumen Per Bungkus (Rp)")
+            updated_harga = {}
+            all_b_for_price = list(dict.fromkeys([line.strip() for line in brands_text.splitlines() if line.strip()] + list(harga_curr.keys())))
+            for idx_p, b_item in enumerate(all_b_for_price):
+                updated_harga[b_item] = st.number_input(
+                    f"Harga {b_item} (Rp)",
+                    min_value=0,
+                    step=500,
+                    value=int(get_harga_konsumen_brand(b_item, harga_curr)),
+                    key=f"adm_price_{idx_p}_{b_item}",
+                )
+
+            st.markdown("#### 🎯 Target Harian Per SPG & Per Team")
+            updated_targets = dict(targets_curr)
+            for idx_tg, b_item in enumerate(all_b_for_price):
+                rule_item = dict(updated_targets.get(b_item, {}))
+                col_tg1, col_tg2, col_tg3 = st.columns([1.4, 0.8, 0.8])
+                with col_tg1:
+                    st.markdown(f"**{b_item}**")
+                with col_tg2:
+                    t_spg = st.number_input(
+                        f"Target SPG {b_item}",
+                        min_value=1,
+                        step=1,
+                        value=int(rule_item.get("target_spg", 30)),
+                        key=f"adm_tspg_{idx_tg}_{b_item}",
+                    )
+                with col_tg3:
+                    t_tm = st.number_input(
+                        f"Target Team {b_item}",
+                        min_value=1,
+                        step=1,
+                        value=int(rule_item.get("target_team", 60)),
+                        key=f"adm_ttm_{idx_tg}_{b_item}",
+                    )
+                rule_item["target_spg"] = int(t_spg)
+                rule_item["target_team"] = int(t_tm)
+                updated_targets[b_item] = rule_item
+
+            if st.form_submit_button("💾 Simpan Brand, Harga & Target", type="primary", use_container_width=True):
+                new_brands_list = [line.strip() for line in brands_text.splitlines() if line.strip()]
+                if new_brands_list:
+                    save_master_brands(new_brands_list)
+                save_harga_konsumen(updated_harga)
+                save_target_rules(updated_targets)
+                st.success("✅ Master Brand, Harga Konsumen & Target berhasil disimpan!")
+                st.rerun()
+
+    st.stop()
+
+
 # ====================================================
 # HALAMAN LOGIN UTAMA (SPG, SUPERVISI & REKAP PENJUALAN HARIAN)
 # ====================================================
@@ -3189,3 +3394,7 @@ if not df_user_rekap.empty:
     )
 else:
     st.info(f"Belum ada data laporan tersimpan untuk {st.session_state['user_spg']}.")
+
+# ====================================================
+# HALAMAN UTAMA ADMIN (?page=admin)
+# ====================================================
