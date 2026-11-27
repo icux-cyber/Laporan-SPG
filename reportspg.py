@@ -2010,10 +2010,7 @@ def render_rekapitulasi_penjualan_report(team_name: str, target_date_str: str, a
 
     # --- 1. REKAP PENJUALAN 2 SPG & KONTROL STOK ROKOK ---
     st.markdown(f"### 1️⃣ Rekap Penjualan 2 SPG & Kontrol Stok Rokok ({team_name})")
-    st.caption(
-        "Breakdown penjualan per nama SPG hari ini, input jumlah stok rokok yang dibawa oleh Supervisi, "
-        "dan perhitungan otomatis sisa stok setelah dikurangi penjualan SPG."
-    )
+    st.caption("Dashboard Monitoring")
 
     st.info(
         f"💵 **Jumlah Uang Terkumpul ({target_date_str}) — Penjualan 2 SPG:** "
@@ -4259,8 +4256,7 @@ if st.session_state["login_mode"] == "Supervisi":
         """, unsafe_allow_html=True)
 
     st.markdown("---")
-    st.markdown(f"### 👀 Dashboard Monitoring & Entry Supervisi: {st.session_state['user_spg']} (Plat Mobil: `{st.session_state['plat_mobil']}`)")
-    st.caption("Alur 2 Save: (1) Save Titik LKK untuk membuka input SPG, lalu setelah SPG selesai jualan (2) Save Jumlah Kontak Konsumen Tim.")
+    st.markdown("### 👀 Dashboard Monitoring & Entry Supervisi: Team Super AA 1 (Plat Mobil: L 1234 ABC)")
 
     sup_nonce = st.session_state.get("sup_kontak_nonce", 0)
     with st.form(f"form_entry_kontak_supervisi_{sup_nonce}"):
@@ -4379,6 +4375,13 @@ if st.session_state["login_mode"] == "Supervisi":
         st.markdown(f'<div class="dashboard-card"><div class="card-value" style="font-size: 1.05rem; padding-top: 6px;">{spg_list_str}</div><div class="card-label">SPG Bertugas Hari Ini</div></div>', unsafe_allow_html=True)
 
     st.markdown("---")
+    render_rekapitulasi_penjualan_report(
+        team_name=st.session_state["user_spg"],
+        target_date_str=today_str_sup,
+        allow_edit_stok=True,
+    )
+
+    st.markdown("---")
     st.markdown(f"#### 📊 Rekapitulasi Combine Per Titik LKK ({st.session_state['user_spg']})")
 
     df_rekap_sup = pd.DataFrame(columns=["Kecamatan", "Warkop_LKK", "Kontak_Supervisi_Team"])
@@ -4438,13 +4441,6 @@ if st.session_state["login_mode"] == "Supervisi":
         st.dataframe(df_combine_rekap, use_container_width=True)
     else:
         st.info("Titik LKK akan tampil di rekap setelah Supervisi menginput jumlah kontak.")
-
-    st.markdown("---")
-    render_rekapitulasi_penjualan_report(
-        team_name=st.session_state["user_spg"],
-        target_date_str=today_str_sup,
-        allow_edit_stok=True,
-    )
 
     st.markdown("#### 📑 Log Detail Transaksi Konsumen Beli (SPG) di Warkop Ini")
     if not df_lkk_active_spg.empty:
