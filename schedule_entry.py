@@ -41,13 +41,28 @@ FLAT_SCHEDULE_REQUIRED_COLS = {
 }
 
 
+def _file_mtime(path: str) -> float:
+    return os.path.getmtime(path) if os.path.exists(path) else 0.0
+
+
+@st.cache_data(show_spinner=False)
+def _cached_read_excel_file(path: str, mtime: float) -> pd.DataFrame:
+    frame = pd.read_excel(path)
+    frame.columns = [str(column).strip() for column in frame.columns]
+    return frame
+
+
+@st.cache_data(show_spinner=False)
+def _cached_read_json_file(path: str, mtime: float):
+    with open(path, "r", encoding="utf-8") as file:
+        return json.load(file)
+
+
 def load_schedule():
     if not os.path.exists(SCHEDULE_FILE):
         return pd.DataFrame(columns=["Kota", "Kecamatan"])
     try:
-        frame = pd.read_excel(SCHEDULE_FILE)
-        frame.columns = [str(column).strip() for column in frame.columns]
-        return frame
+        return _cached_read_excel_file(SCHEDULE_FILE, _file_mtime(SCHEDULE_FILE)).copy()
     except Exception as exc:
         st.error(f"Gagal membaca {SCHEDULE_FILE}: {exc}")
         return pd.DataFrame(columns=["Kota", "Kecamatan"])
@@ -56,6 +71,7 @@ def load_schedule():
 def save_schedule(frame):
     try:
         frame.to_excel(SCHEDULE_FILE, index=False)
+        st.cache_data.clear()
         return True
     except Exception as exc:
         st.error(f"Gagal menyimpan {SCHEDULE_FILE}: {exc}")
@@ -65,8 +81,9 @@ def save_schedule(frame):
 def read_json(path, fallback):
     if os.path.exists(path):
         try:
-            with open(path, "r", encoding="utf-8") as file:
-                return json.load(file)
+            data = _cached_read_json_file(path, _file_mtime(path))
+            if data is not None:
+                return data
         except (OSError, ValueError, TypeError):
             pass
     return fallback
@@ -74,13 +91,14 @@ def read_json(path, fallback):
 
 def load_details():
     details = read_json(SCHEDULE_DETAIL_FILE, {})
-    return details if isinstance(details, dict) else {}
+    return dict(details) if isinstance(details, dict) else {}
 
 
 def save_details(details):
     try:
         with open(SCHEDULE_DETAIL_FILE, "w", encoding="utf-8") as file:
             json.dump(details, file, ensure_ascii=False, indent=2)
+        st.cache_data.clear()
         return True
     except (OSError, TypeError, ValueError) as exc:
         st.error(f"Gagal menyimpan detail jadwal: {exc}")
@@ -142,21 +160,29 @@ def vehicle_choices():
     return cleaned or DEFAULT_VEHICLES
 
 
-def get_geo_districts(city):
-    filename = "Gresik.geojson" if city == "Gresik" else "Surabaya Barat.geojson"
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_geo_districts(filename: str, mtime: float) -> list[str]:
     try:
         with open(filename, "r", encoding="utf-8") as file:
             geojson = json.load(file)
-        frame = pd.DataFrame(feature.get("properties", {}) for feature in geojson.get("features", []))
-        column = next(
-            (name for name in ["nm_kecamatan", "KECAMATAN", "kecamatan", "Name", "NAME"] if name in frame.columns),
-            None,
-        )
-        if column:
-            return sorted(frame[column].dropna().astype(str).str.strip().unique().tolist())
+        districts = []
+        for feature in geojson.get("features", []):
+            props = feature.get("properties") or {}
+            for col_name in ["nm_kecamatan", "KECAMATAN", "kecamatan", "Name", "NAME"]:
+                val = props.get(col_name)
+                if val is not None and str(val).strip():
+                    districts.append(str(val).strip())
+                    break
+        if districts:
+            return sorted(set(districts))
     except (OSError, ValueError, TypeError):
         pass
     return ["Tegalsari", "Wonokromo", "Rungkut", "Asemrowo", "Benowo"]
+
+
+def get_geo_districts(city):
+    filename = "Gresik.geojson" if city == "Gresik" else "Surabaya Barat.geojson"
+    return _cached_geo_districts(filename, _file_mtime(filename))
 
 
 def is_active(value):
@@ -341,7 +367,6 @@ def _parse_flat_row_schedule_upload(uploaded_file):
         kota = clean_str_cell(row.get(kota_col_src))
         sektor = clean_str_cell(row.get(sektor_col_src))
 
-        # Lewati baris kosong
         if not any([pd.notna(raw_date), team, spg1, spg2, spv, plat, kota, sektor]):
             continue
 
@@ -604,8 +629,15 @@ def retain_matching_schedule_details(details, frame, city_col, district_col, dat
     return retained
 
 
-def build_schedule_excel(schedule, details, city_col, district_col):
-    """Mengekspor jadwal aktif dalam format tabel datar lengkap (Tanggal, Team, SPG 1, SPG 2, Supervisi, Plat, Kota, Sektor)."""
+@st.cache_data(show_spinner=False)
+def _cached_build_schedule_excel(
+    sched_mtime: float,
+    details_mtime: float,
+    city_col: str,
+    district_col: str,
+) -> bytes:
+    schedule = load_schedule()
+    details = load_details()
     date_cols = [
         column
         for column in schedule.columns
@@ -650,12 +682,26 @@ def build_schedule_excel(schedule, details, city_col, district_col):
     return buffer.getvalue()
 
 
-def build_schedule_template_excel(week_anchor):
-    """Membuat template Excel format baru lengkap dengan dropdown Master Team dan Plat Kendaraan."""
-    week_start = week_anchor - timedelta(days=week_anchor.weekday())
+def build_schedule_excel(schedule, details, city_col, district_col):
+    """Mengekspor jadwal aktif dalam format tabel datar lengkap (Tanggal, Team, SPG 1, SPG 2, Supervisi, Plat, Kota, Sektor)."""
+    return _cached_build_schedule_excel(
+        _file_mtime(SCHEDULE_FILE),
+        _file_mtime(SCHEDULE_DETAIL_FILE),
+        city_col,
+        district_col,
+    )
+
+
+@st.cache_data(show_spinner=False)
+def _cached_build_schedule_template_excel(
+    week_start_iso: str,
+    teams_tuple: tuple,
+    vehicles_tuple: tuple,
+) -> bytes:
+    week_start = date.fromisoformat(week_start_iso)
     workdays = [week_start + timedelta(days=offset) for offset in range(5)]
-    teams = team_choices()
-    vehicles = vehicle_choices()
+    teams = list(teams_tuple)
+    vehicles = list(vehicles_tuple)
 
     sample_rows = []
     for workday in workdays:
@@ -717,6 +763,16 @@ def build_schedule_template_excel(week_anchor):
         vehicle_validation.add(f"F2:F{last_row}")
 
     return output.getvalue()
+
+
+def build_schedule_template_excel(week_anchor):
+    """Membuat template Excel format baru lengkap dengan dropdown Master Team dan Plat Kendaraan."""
+    week_start = week_anchor - timedelta(days=week_anchor.weekday())
+    return _cached_build_schedule_template_excel(
+        week_start.isoformat(),
+        tuple(team_choices()),
+        tuple(vehicle_choices()),
+    )
 
 
 def build_schedule_preview(frame, details, city_col, district_col, date_cols, uploaded_vehicles, extra_payload=None):
@@ -843,6 +899,17 @@ def render_schedule_entry():
     teams = team_choices()
     vehicles = vehicle_choices()
 
+    districts_by_city = {c: get_geo_districts(c) for c in CITIES}
+    team_brands_cache = {}
+    for t in teams:
+        if t not in team_brands_cache:
+            team_brands_cache[t] = brands_for_team(t)
+
+    def _get_brands(t_name):
+        if t_name not in team_brands_cache:
+            team_brands_cache[t_name] = brands_for_team(t_name)
+        return team_brands_cache[t_name]
+
     tab_day, tab_week, tab_manage, tab_excel = st.tabs(
         [
             "➕ Tambah Hari Kerja",
@@ -872,15 +939,16 @@ def render_schedule_entry():
             with col_spg2:
                 spg2_name = st.text_input("Nama SPG 2", key="new_workday_spg2")
 
-            districts = st.multiselect("Sektor / Kecamatan yang dijadwalkan", get_geo_districts(city), key="new_workday_districts")
+            districts = st.multiselect("Sektor / Kecamatan yang dijadwalkan", districts_by_city.get(city, []), key="new_workday_districts")
             col_vehicle, col_brands = st.columns(2)
             with col_vehicle:
                 vehicle = st.selectbox("Kendaraan / Plat Nomor", vehicles, key="new_workday_vehicle")
             with col_brands:
+                day_brand_opts = _get_brands(team)
                 brands = st.multiselect(
                     "Rokok yang dibawa",
-                    brands_for_team(team),
-                    default=brands_for_team(team),
+                    day_brand_opts,
+                    default=day_brand_opts,
                     key="new_workday_brands",
                     help="Pilihan merek mengikuti alokasi pada Master Team & Brand.",
                 )
@@ -927,13 +995,14 @@ def render_schedule_entry():
 
             st.info(f"Periode minggu: {week_start.strftime('%d %b %Y')} – {week_end.strftime('%d %b %Y')}")
             workdays = st.multiselect("Hari kerja", WEEKDAYS, default=WEEKDAYS[:5], key="new_week_days")
-            week_districts = st.multiselect("Sektor / Kecamatan yang dijadwalkan", get_geo_districts(week_city), key="new_week_districts")
+            week_districts = st.multiselect("Sektor / Kecamatan yang dijadwalkan", districts_by_city.get(week_city, []), key="new_week_districts")
             col_vehicle_week, col_brands_week = st.columns(2)
             with col_vehicle_week:
                 week_vehicle = st.selectbox("Kendaraan / Plat Nomor", vehicles, key="new_week_vehicle")
             with col_brands_week:
+                week_brand_opts = _get_brands(week_team)
                 week_brands = st.multiselect(
-                    "Rokok yang dibawa", brands_for_team(week_team), default=brands_for_team(week_team),
+                    "Rokok yang dibawa", week_brand_opts, default=week_brand_opts,
                     key="new_week_brands", help="Pilihan merek mengikuti alokasi pada Master Team & Brand.",
                 )
             submit_week = st.form_submit_button("🗓️ Buat Jadwal Mingguan", type="primary")
@@ -1007,7 +1076,7 @@ def render_schedule_entry():
                     f"SPV: {entry['supervisi'] or '-'} · SPG: {spg_caption}"
                 )
                 with st.expander(f"📍 {heading}", expanded=False):
-                    brands_allowed = brands_for_team(entry["team"])
+                    brands_allowed = _get_brands(entry["team"])
                     default_brands = [brand for brand in entry["brands"] if brand in brands_allowed]
                     entry_teams = teams if entry["team"] in teams else [entry["team"], *teams]
                     entry_vehicles = vehicles if entry["vehicle"] in vehicles else [entry["vehicle"], *vehicles]
@@ -1026,7 +1095,7 @@ def render_schedule_entry():
                             edited_city = st.selectbox("Kota / Kabupaten", CITIES, index=city_index, key=f"city_{entry_id}")
                         col_district_edit, col_team_edit = st.columns(2)
                         with col_district_edit:
-                            district_options = get_geo_districts(edited_city)
+                            district_options = districts_by_city.get(edited_city, [])
                             district_index = district_options.index(entry["district"]) if entry["district"] in district_options else None
                             if district_index is None:
                                 edited_district = st.text_input("Sektor / Kecamatan", value=entry["district"], key=f"district_{entry_id}")
@@ -1054,7 +1123,7 @@ def render_schedule_entry():
                             )
                         with col_brands_edit:
                             edited_brands = st.multiselect(
-                                "Rokok yang dibawa", brands_for_team(edited_team), default=default_brands,
+                                "Rokok yang dibawa", _get_brands(edited_team), default=default_brands,
                                 key=f"brands_{entry_id}", help="Pilihan merek mengikuti alokasi Master Team & Brand.",
                             )
                         save_col, delete_col = st.columns(2)
@@ -1123,6 +1192,7 @@ def render_schedule_entry():
                             st.rerun()
 
     if st.button("🔄 Muat Ulang Jadwal", key="reload_schedule"):
+        st.cache_data.clear()
         st.rerun()
 
     with tab_excel:
