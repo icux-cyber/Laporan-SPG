@@ -778,6 +778,22 @@ def save_locked_lkk_point(team_name: str, point_info: dict) -> bool:
         return False
 
 
+def clear_locked_lkk_point(team_name: str) -> bool:
+    """Membuka kunci titik LKK aktif setelah Supervisi menyelesaikan kunjungan & menyimpan kontak konsumen."""
+    all_locked = load_locked_lkk_points()
+    key = str(team_name or "").strip().casefold()
+    if key in all_locked:
+        all_locked.pop(key, None)
+        try:
+            with open(LOCKED_LKK_POINT_FILE, "w", encoding="utf-8") as f:
+                json.dump(all_locked, f, ensure_ascii=False, indent=2)
+            st.cache_data.clear()
+            return True
+        except Exception:
+            return False
+    return True
+
+
 def get_active_locked_lkk_point_today(team_name: str, fallback_kota: str = "") -> dict | None:
     """Mengambil titik LKK yang sudah di-save / di-lock oleh Supervisi untuk team hari ini (WIB)."""
     today_str = (datetime.utcnow() + timedelta(hours=7)).strftime("%Y-%m-%d")
@@ -806,6 +822,32 @@ def get_active_locked_lkk_point_today(team_name: str, fallback_kota: str = "") -
         "status_kunjungan": status_kunjungan,
         "locked_at": str(entry.get("locked_at", "") or "").strip(),
     }
+
+
+def get_saved_contact_warkops_on_date(
+    team_name: str,
+    target_date_str: str,
+    df_sup: pd.DataFrame | None = None,
+) -> set[tuple[str, str]]:
+    """Mengambil himpunan (kecamatan_casefold, warkop_casefold) yang sudah disimpan datanya lewat Save Jumlah Kontak Konsumen pada tanggal tertentu."""
+    if df_sup is None:
+        df_sup = load_supervisi_database()
+    if df_sup is None or df_sup.empty:
+        return set()
+
+    mask = (
+        df_sup["Promotor"].astype(str).str.strip().str.casefold()
+        == str(team_name or "").strip().casefold()
+    ) & (
+        df_sup["Waktu"].astype(str).str.startswith(str(target_date_str or "").strip())
+    )
+    saved_pairs = set()
+    for _, row in df_sup[mask].iterrows():
+        w_val = str(row.get("Warkop_LKK", "") or "").strip().casefold()
+        kc_val = str(row.get("Kecamatan", "") or "").strip().casefold()
+        if w_val:
+            saved_pairs.add((kc_val, w_val))
+    return saved_pairs
 
 
 def df_to_sheet_rows(df: pd.DataFrame):
@@ -913,6 +955,7 @@ def load_supabase_backup_data():
             "plat_kendaraan": read_json_file(MASTER_PLAT_FILE),
             "jadwal_detail": read_json_file(SCHEDULE_DETAIL_FILE),
             "akses_user": read_json_file(MASTER_AKSES_FILE),
+            "status_warkop": read_json_file(WARKOP_VISIT_STATUS_FILE),
         },
     }
 
@@ -1043,6 +1086,11 @@ def restore_supabase_backup(snapshot):
     if "akses_user" in master_data and master_data["akses_user"] is not None:
         file_contents[MASTER_AKSES_FILE] = json.dumps(
             master_data["akses_user"], ensure_ascii=False, indent=2
+        ).encode("utf-8")
+
+    if "status_warkop" in master_data and master_data["status_warkop"] is not None:
+        file_contents[WARKOP_VISIT_STATUS_FILE] = json.dumps(
+            master_data["status_warkop"], ensure_ascii=False, indent=2
         ).encode("utf-8")
 
     staged_files = {}
@@ -1930,14 +1978,18 @@ def style_status_target(val):
 # FUNGSI REPORT REKAPITULASI PENJUALAN & KONTROL STOK ROKOK
 # ====================================================
 def render_rekapitulasi_penjualan_report(team_name: str, target_date_str: str, allow_edit_stok: bool = True):
-    """Menampilkan 3 komponen laporan:
+    """Menampilkan komponen laporan:
     1. Rekap Penjualan 2 SPG & Kontrol Stok Rokok
     2. Breakdown Penjualan Per Nama SPG Hari Ini
     3. Rekap Stok Dibawa, Terjual 2 SPG & Sisa Stok Per Merk
+    4. Rekap Kunjungan Warkop / LKK Hari Ini (4A Wajib Kunjung Belum Dikunjungi & 4B Semua Warkop Dikunjungi)
     """
     df_all_db = load_database()
+    df_all_sup_db = load_supervisi_database()
     harga_konsumen_map = load_harga_konsumen()
     stok_sup_map = load_stok_supervisi()
+    status_map_report = load_warkop_visit_status_map()
+    df_warkop_master = build_warkop_status_dataframe(load_master_lokasi_excel(), status_map_report)
 
     df_team_spg_today = pd.DataFrame()
     if not df_all_db.empty and "Promotor" in df_all_db.columns:
@@ -1956,6 +2008,17 @@ def render_rekapitulasi_penjualan_report(team_name: str, target_date_str: str, a
         df_team_spg_today["Total_Uang_Rp"] = (
             df_team_spg_today["Jumlah_Bungkus"] * df_team_spg_today["Harga_Konsumen"]
         ).astype(int)
+
+    df_team_sup_today = pd.DataFrame()
+    if not df_all_sup_db.empty and "Promotor" in df_all_sup_db.columns:
+        df_team_sup_today = df_all_sup_db[
+            (df_all_sup_db["Promotor"].astype(str).str.strip().str.casefold() == str(team_name).strip().casefold())
+            & (df_all_sup_db["Waktu"].astype(str).str.startswith(str(target_date_str).strip()))
+        ].copy()
+        if not df_team_sup_today.empty:
+            df_team_sup_today["Jumlah_Kontak_Manual"] = pd.to_numeric(
+                df_team_sup_today["Jumlah_Kontak_Manual"], errors="coerce"
+            ).fillna(0).astype(int)
 
     all_brands_sup = load_master_brands()
     team_brands_sup_map = load_master_team_brands()
@@ -2139,6 +2202,141 @@ def render_rekapitulasi_penjualan_report(team_name: str, target_date_str: str, a
         )
     else:
         st.info("Belum ada data stok atau merk untuk direkap.")
+
+    st.markdown("---")
+    # --- 4. REKAP KUNJUNGAN WARKOP / LKK HARI INI ---
+    st.markdown(f"### 4️⃣ Rekap Kunjungan Warkop / LKK ({target_date_str})")
+
+    # Kumpulkan data kunjungan dari log Supervisi dan transaksi SPG pada tanggal tersebut
+    visited_records_map = {}
+
+    if not df_team_sup_today.empty:
+        for _, r_sup in df_team_sup_today.iterrows():
+            w_nm = str(r_sup.get("Warkop_LKK", "") or "").strip()
+            if not w_nm:
+                continue
+            kc_nm = str(r_sup.get("Kecamatan", "") or "").strip()
+            kt_nm = str(r_sup.get("Kota_Kab", "Surabaya") or "Surabaya").strip()
+            alm_nm = str(r_sup.get("Alamat_Warkop", "-") or "-").strip() or "-"
+            wkt_nm = str(r_sup.get("Waktu", "") or "").strip()
+            knt_val = int(pd.to_numeric(r_sup.get("Jumlah_Kontak_Manual", 0), errors="coerce") or 0)
+            key_pair = (kc_nm.casefold(), w_nm.casefold())
+            if key_pair not in visited_records_map:
+                visited_records_map[key_pair] = {
+                    "Kota": kt_nm,
+                    "Kecamatan": kc_nm,
+                    "Warkop_LKK": w_nm,
+                    "Alamat_Warkop": alm_nm,
+                    "Status_Kunjungan": get_warkop_visit_status(kt_nm, kc_nm, w_nm, status_map_report),
+                    "Waktu_Kunjungan": wkt_nm,
+                    "Jumlah_Kontak_Tim": knt_val,
+                    "Jumlah_Konsumen_Beli": 0,
+                    "Total_Bungkus_Terjual": 0,
+                }
+            else:
+                visited_records_map[key_pair]["Jumlah_Kontak_Tim"] += knt_val
+                if wkt_nm and (
+                    not visited_records_map[key_pair]["Waktu_Kunjungan"]
+                    or wkt_nm > visited_records_map[key_pair]["Waktu_Kunjungan"]
+                ):
+                    visited_records_map[key_pair]["Waktu_Kunjungan"] = wkt_nm
+
+    if not df_team_spg_today.empty:
+        for _, r_spg in df_team_spg_today.iterrows():
+            w_nm = str(r_spg.get("Warkop_LKK", "") or "").strip()
+            if not w_nm:
+                continue
+            kc_nm = str(r_spg.get("Kecamatan", "") or "").strip()
+            kt_nm = str(r_spg.get("Kota_Kab", "Surabaya") or "Surabaya").strip()
+            alm_nm = str(r_spg.get("Alamat_Warkop", "-") or "-").strip() or "-"
+            wkt_nm = str(r_spg.get("Waktu", "") or "").strip()
+            bks_val = int(pd.to_numeric(r_spg.get("Jumlah_Bungkus", 0), errors="coerce") or 0)
+            key_pair = (kc_nm.casefold(), w_nm.casefold())
+            if key_pair not in visited_records_map:
+                visited_records_map[key_pair] = {
+                    "Kota": kt_nm,
+                    "Kecamatan": kc_nm,
+                    "Warkop_LKK": w_nm,
+                    "Alamat_Warkop": alm_nm,
+                    "Status_Kunjungan": get_warkop_visit_status(kt_nm, kc_nm, w_nm, status_map_report),
+                    "Waktu_Kunjungan": wkt_nm,
+                    "Jumlah_Kontak_Tim": 0,
+                    "Jumlah_Konsumen_Beli": 1,
+                    "Total_Bungkus_Terjual": bks_val,
+                }
+            else:
+                visited_records_map[key_pair]["Jumlah_Konsumen_Beli"] += 1
+                visited_records_map[key_pair]["Total_Bungkus_Terjual"] += bks_val
+                if wkt_nm and (
+                    not visited_records_map[key_pair]["Waktu_Kunjungan"]
+                    or wkt_nm > visited_records_map[key_pair]["Waktu_Kunjungan"]
+                ):
+                    visited_records_map[key_pair]["Waktu_Kunjungan"] = wkt_nm
+
+    visited_keys_set = set(visited_records_map.keys())
+    visited_warkop_names_only = {w for _, w in visited_keys_set}
+
+    # Tentukan kecamatan yang relevan pada tanggal tersebut (jadwal tanggal tsb + warkop yang sudah dikunjungi)
+    slots_for_date = get_scheduled_slots_for_date(parsed_target_date)
+    active_kec_set = {
+        str(s.get("kecamatan", "") or "").strip().casefold()
+        for s in slots_for_date
+        if str(s.get("team", "") or "").strip().casefold() == str(team_name or "").strip().casefold()
+        and str(s.get("kecamatan", "") or "").strip()
+    }
+    for kc_k, _ in visited_keys_set:
+        if kc_k:
+            active_kec_set.add(kc_k)
+
+    # --- 4A. DAFTAR WARKOP WAJIB KUNJUNG YANG BELUM DIKUNJUNGI ---
+    st.markdown("#### 4A. Daftar Warkop Wajib Kunjung yang Belum Dikunjungi")
+    unvisited_wajib_rows = []
+    if not df_warkop_master.empty:
+        wajib_df = df_warkop_master[df_warkop_master["Status Kunjungan"] == VISIT_STATUS_WAJIB].copy()
+        if active_kec_set:
+            wajib_df = wajib_df[
+                wajib_df["Kecamatan"].astype(str).str.strip().str.casefold().isin(active_kec_set)
+            ]
+        for _, rw in wajib_df.iterrows():
+            kt_w = str(rw.get("Kota", "") or "").strip()
+            kc_w = str(rw.get("Kecamatan", "") or "").strip()
+            nm_w = str(rw.get("Nama Warkop / LKK", "") or "").strip()
+            alm_w = str(rw.get("Alamat Warkop / LKK", "-") or "-").strip() or "-"
+            pair_w = (kc_w.casefold(), nm_w.casefold())
+            if pair_w not in visited_keys_set and nm_w.casefold() not in visited_warkop_names_only:
+                unvisited_wajib_rows.append({
+                    "Kota": kt_w,
+                    "Kecamatan": kc_w,
+                    "Nama Warkop / LKK": nm_w,
+                    "Alamat Warkop / LKK": alm_w,
+                    "Status Kunjungan": VISIT_STATUS_WAJIB,
+                })
+
+    if unvisited_wajib_rows:
+        df_4a = pd.DataFrame(unvisited_wajib_rows).sort_values(
+            by=["Kecamatan", "Nama Warkop / LKK"]
+        ).reset_index(drop=True)
+        st.dataframe(df_4a, use_container_width=True, hide_index=True)
+        st.warning(f"⚠️ Terdapat **{len(df_4a)}** warkop **Wajib Kunjung** yang belum dikunjungi pada {target_date_str}.")
+    else:
+        st.success(f"✅ Seluruh warkop **Wajib Kunjung** pada wilayah aktif ({target_date_str}) sudah dikunjungi!")
+
+    # --- 4B. SEMUA WARKOP YANG DIKUNJUNGI HARI INI ---
+    st.markdown("#### 4B. Semua Warkop yang Dikunjungi Hari Ini")
+    if visited_records_map:
+        df_4b = pd.DataFrame(list(visited_records_map.values())).sort_values(
+            by=["Waktu_Kunjungan", "Kecamatan", "Warkop_LKK"],
+            ascending=[False, True, True],
+        ).reset_index(drop=True)
+        st.dataframe(df_4b, use_container_width=True, hide_index=True)
+        st.info(
+            f"📍 **Ringkasan Kunjungan ({target_date_str}):** **{len(df_4b)}** warkop dikunjungi • "
+            f"Total Kontak Tim: **{int(df_4b['Jumlah_Kontak_Tim'].sum()):,}** • "
+            f"Konsumen Beli: **{int(df_4b['Jumlah_Konsumen_Beli'].sum()):,}** • "
+            f"Terjual: **{int(df_4b['Total_Bungkus_Terjual'].sum()):,} bks**"
+        )
+    else:
+        st.info(f"Belum ada warkop yang tercatat dikunjungi pada tanggal {target_date_str}.")
 
 
 # ====================================================
@@ -4106,6 +4304,22 @@ col_alamat_excel = next(
 # MODE SUPERVISI (2 MENU SAVE: SAVE TITIK LKK & SAVE JUMLAH KONTAK)
 # ====================================================
 if st.session_state["login_mode"] == "Supervisi":
+    today_str_sup_hdr = (datetime.utcnow() + timedelta(hours=7)).strftime("%Y-%m-%d")
+    saved_contact_pairs_today = get_saved_contact_warkops_on_date(
+        team_name=st.session_state["user_spg"],
+        target_date_str=today_str_sup_hdr,
+        df_sup=df_sup_today_all,
+    )
+    saved_contact_warkops_names = {w_n for _, w_n in saved_contact_pairs_today}
+
+    # Jika titik yang sedang di-lock sudah disimpan kontaknya hari ini, lepas lock-nya agar tidak mengunci warkop yang sudah selesai
+    if locked_point_today:
+        lp_kc = str(locked_point_today.get("kecamatan", "") or "").strip().casefold()
+        lp_w = str(locked_point_today.get("warkop", "") or "").strip().casefold()
+        if (lp_kc, lp_w) in saved_contact_pairs_today or lp_w in saved_contact_warkops_names:
+            clear_locked_lkk_point(st.session_state["user_spg"])
+            locked_point_today = None
+
     col_banner, col_logout = st.columns([0.8, 0.2])
     with col_banner:
         spv_aktif = st.session_state.get("nama_supervisi_aktif", "").strip()
@@ -4190,67 +4404,78 @@ if st.session_state["login_mode"] == "Supervisi":
                 filtered_df_warkop = df_master_excel.copy()
             raw_wrk_names = filtered_df_warkop[col_warkop_excel].dropna().astype(str).str.strip().tolist()
             seen_w = set()
+            kc_cf = str(kecamatan_pilihan).strip().casefold()
             for w_item in raw_wrk_names:
-                if not w_item or w_item.casefold() in seen_w:
+                w_cf = w_item.casefold()
+                if not w_item or w_cf in seen_w:
                     continue
-                seen_w.add(w_item.casefold())
+                seen_w.add(w_cf)
+                # Hilangkan warkop yang sudah disimpan datanya lewat Save Jumlah Kontak Konsumen hari ini
+                if (kc_cf, w_cf) in saved_contact_pairs_today or w_cf in saved_contact_warkops_names:
+                    continue
                 st_item = get_warkop_visit_status(st.session_state["kota_kab"], kecamatan_pilihan, w_item, status_map_sup)
                 if filter_kategori_w != "Semua" and st_item != filter_kategori_w:
                     continue
                 filtered_warkop_list.append(w_item)
 
         if not filtered_warkop_list:
-            filtered_warkop_list = ["Warkop Alternatif 1", "Warkop Alternatif 2"]
-
-        default_w_idx = 0
-        if locked_point_today and locked_point_today.get("warkop") in filtered_warkop_list:
-            default_w_idx = filtered_warkop_list.index(locked_point_today["warkop"])
-
-        nama_warkop_manual = st.selectbox(
-            f"Warkop / LKK di {kecamatan_pilihan}",
-            options=filtered_warkop_list,
-            index=default_w_idx,
-            format_func=lambda w_name: f"[{'WAJIB' if get_warkop_visit_status(st.session_state['kota_kab'], kecamatan_pilihan, w_name, status_map_sup) == VISIT_STATUS_WAJIB else 'OPSI'}] {w_name}",
-            help="Menampilkan status Wajib Kunjung / Opsional sesuai pengaturan Admin.",
-        )
-        status_warkop_terpilih = get_warkop_visit_status(
-            st.session_state["kota_kab"], kecamatan_pilihan, nama_warkop_manual, status_map_sup
-        )
-        alamat_warkop_terpilih = "-"
-        if not df_master_excel.empty and col_warkop_excel and col_alamat_excel:
-            match_row = df_master_excel[
-                df_master_excel[col_warkop_excel].astype(str).str.strip() == str(nama_warkop_manual).strip()
-            ]
-            if not match_row.empty:
-                alamat_warkop_terpilih = str(match_row.iloc[0][col_alamat_excel])
-
-        if st.button("🔒 Save Titik LKK (Buka Akses Input SPG)", type="primary", use_container_width=True, key="btn_save_lock_lkk"):
-            saved_lock = save_locked_lkk_point(
-                team_name=st.session_state["user_spg"],
-                point_info={
-                    "kota": st.session_state["kota_kab"],
-                    "kecamatan": str(kecamatan_pilihan).strip(),
-                    "warkop": str(nama_warkop_manual).strip(),
-                    "alamat": alamat_warkop_terpilih,
-                    "status_kunjungan": status_warkop_terpilih,
-                },
+            st.info(
+                f"ℹ️ Semua warkop pada kategori **{filter_kategori_w}** di **{kecamatan_pilihan}** "
+                "sudah disimpan jumlah kontaknya hari ini (atau belum ada titik tersisa)."
             )
-            if saved_lock:
-                st.success(
-                    f"✅ Titik LKK **{str(nama_warkop_manual).strip()}** ({kecamatan_pilihan} • **{status_warkop_terpilih}**) berhasil di-save & di-lock! "
-                    "SPG kini dapat menginput laporan di titik ini."
+            nama_warkop_manual = ""
+            status_warkop_terpilih = "-"
+            alamat_warkop_terpilih = "-"
+        else:
+            default_w_idx = 0
+            if locked_point_today and locked_point_today.get("warkop") in filtered_warkop_list:
+                default_w_idx = filtered_warkop_list.index(locked_point_today["warkop"])
+
+            nama_warkop_manual = st.selectbox(
+                f"Warkop / LKK di {kecamatan_pilihan}",
+                options=filtered_warkop_list,
+                index=default_w_idx,
+                format_func=lambda w_name: f"[{'WAJIB' if get_warkop_visit_status(st.session_state['kota_kab'], kecamatan_pilihan, w_name, status_map_sup) == VISIT_STATUS_WAJIB else 'OPSI'}] {w_name}",
+                help="Menampilkan warkop yang belum dikunjungi & disimpan kontaknya hari ini.",
+            )
+            status_warkop_terpilih = get_warkop_visit_status(
+                st.session_state["kota_kab"], kecamatan_pilihan, nama_warkop_manual, status_map_sup
+            )
+            alamat_warkop_terpilih = "-"
+            if not df_master_excel.empty and col_warkop_excel and col_alamat_excel:
+                match_row = df_master_excel[
+                    df_master_excel[col_warkop_excel].astype(str).str.strip() == str(nama_warkop_manual).strip()
+                ]
+                if not match_row.empty:
+                    alamat_warkop_terpilih = str(match_row.iloc[0][col_alamat_excel])
+
+            if st.button("🔒 Save Titik LKK (Buka Akses Input SPG)", type="primary", use_container_width=True, key="btn_save_lock_lkk"):
+                saved_lock = save_locked_lkk_point(
+                    team_name=st.session_state["user_spg"],
+                    point_info={
+                        "kota": st.session_state["kota_kab"],
+                        "kecamatan": str(kecamatan_pilihan).strip(),
+                        "warkop": str(nama_warkop_manual).strip(),
+                        "alamat": alamat_warkop_terpilih,
+                        "status_kunjungan": status_warkop_terpilih,
+                    },
                 )
-                st.rerun()
+                if saved_lock:
+                    st.success(
+                        f"✅ Titik LKK **{str(nama_warkop_manual).strip()}** ({kecamatan_pilihan} • **{status_warkop_terpilih}**) berhasil di-save & di-lock! "
+                        "SPG kini dapat menginput laporan di titik ini."
+                    )
+                    st.rerun()
 
         st.markdown(f"""
         <div class="address-box">
-            📍 <b>Kecamatan:</b> {kecamatan_pilihan} &nbsp;|&nbsp; <b>Warkop / LKK:</b> {nama_warkop_manual or '(Belum di-save Supervisi)'} &nbsp;|&nbsp; <b>Status:</b> {status_warkop_terpilih}<br/>
+            📍 <b>Kecamatan:</b> {kecamatan_pilihan} &nbsp;|&nbsp; <b>Warkop / LKK:</b> {nama_warkop_manual or '(Tidak ada warkop tersisa / belum dipilih)'} &nbsp;|&nbsp; <b>Status:</b> {status_warkop_terpilih}<br/>
             🏠 <b>Alamat:</b> {alamat_warkop_terpilih}
         </div>
         """, unsafe_allow_html=True)
 
     st.markdown("---")
-    st.markdown("### 👀 Dashboard Monitoring & Entry Supervisi: Team Super AA 1 (Plat Mobil: L 1234 ABC)")
+    st.markdown(f"### 👀 Dashboard Monitoring & Entry Supervisi: {st.session_state['user_spg']} (Plat Mobil: {st.session_state['plat_mobil']})")
 
     sup_nonce = st.session_state.get("sup_kontak_nonce", 0)
     with st.form(f"form_entry_kontak_supervisi_{sup_nonce}"):
@@ -4273,27 +4498,59 @@ if st.session_state["login_mode"] == "Supervisi":
             else:
                 df_sup_db = load_supervisi_database()
                 waktu_wib = datetime.utcnow() + timedelta(hours=7)
+                warkop_saved_clean = str(nama_warkop_manual).strip()
                 new_sup_row = {
                     "Waktu": waktu_wib.strftime("%Y-%m-%d %H:%M:%S"),
                     "Promotor": st.session_state["user_spg"],
                     "Plat_Mobil": st.session_state["plat_mobil"],
                     "Kota_Kab": st.session_state["kota_kab"],
                     "Kecamatan": kecamatan_pilihan,
-                    "Warkop_LKK": str(nama_warkop_manual).strip(),
+                    "Warkop_LKK": warkop_saved_clean,
                     "Alamat_Warkop": alamat_warkop_terpilih,
                     "Jumlah_Kontak_Manual": int(jumlah_kontak_input),
                 }
                 df_sup_db = pd.concat([df_sup_db, pd.DataFrame([new_sup_row])], ignore_index=True)
                 save_supervisi_database(df_sup_db)
+                clear_locked_lkk_point(st.session_state["user_spg"])
                 st.session_state["sup_kontak_nonce"] = sup_nonce + 1
                 st.session_state["sup_last_saved_msg"] = (
                     f"✅ Berhasil menyimpan **{jumlah_kontak_input} kontak tim** untuk titik "
-                    f"**{nama_warkop_manual}**! Data langsung masuk ke log Supervisi & Rekapitulasi Combine."
+                    f"**{warkop_saved_clean}**! Warkop otomatis dihapus dari daftar pilihan hari ini."
                 )
                 st.rerun()
 
     if st.session_state.get("sup_last_saved_msg"):
         st.success(st.session_state.pop("sup_last_saved_msg"))
+
+    # --- LIST WARKOP WAJIB KUNJUNG YANG BELUM DIKUNJUNGI DI BAWAH DASHBOARD SUPERVISI ---
+    st.markdown("#### 📌 List Warkop Wajib Kunjung yang Belum Dikunjungi Hari Ini")
+    df_wrk_all_sup = build_warkop_status_dataframe(df_master_excel, status_map_sup)
+    unvisited_wajib_sup_rows = []
+    if not df_wrk_all_sup.empty:
+        wajib_sup_df = df_wrk_all_sup[
+            (df_wrk_all_sup["Status Kunjungan"] == VISIT_STATUS_WAJIB)
+            & (
+                df_wrk_all_sup["Kecamatan"].astype(str).str.strip().str.casefold()
+                == str(kecamatan_pilihan).strip().casefold()
+            )
+        ]
+        for _, rw in wajib_sup_df.iterrows():
+            nm_w = str(rw.get("Nama Warkop / LKK", "") or "").strip()
+            kc_w = str(rw.get("Kecamatan", "") or "").strip()
+            if (kc_w.casefold(), nm_w.casefold()) in saved_contact_pairs_today or nm_w.casefold() in saved_contact_warkops_names:
+                continue
+            unvisited_wajib_sup_rows.append({
+                "Kota": rw.get("Kota", ""),
+                "Kecamatan": kc_w,
+                "Nama Warkop / LKK": nm_w,
+                "Alamat Warkop / LKK": rw.get("Alamat Warkop / LKK", "-"),
+                "Status Kunjungan": VISIT_STATUS_WAJIB,
+            })
+
+    if unvisited_wajib_sup_rows:
+        st.dataframe(pd.DataFrame(unvisited_wajib_sup_rows), use_container_width=True, hide_index=True)
+    else:
+        st.success(f"✅ Semua warkop **Wajib Kunjung** di **{kecamatan_pilihan}** hari ini sudah dikunjungi & disimpan kontaknya.")
 
     st.markdown("---")
 
@@ -4673,130 +4930,284 @@ elif is_inside_geofence and str(nama_spg_manual).strip() != "":
                 df_all = pd.concat([df_all, df_new_row], ignore_index=True)
                 save_database(df_all)
 
-                st.session_state["draft_brand"] = ""
-                st.session_state["draft_gender"] = "L"
-                st.session_state["draft_range_umur"] = ""
                 st.session_state["draft_konsumen"] = ""
                 st.session_state["draft_nohp"] = ""
                 st.session_state["draft_ig"] = ""
                 st.session_state["draft_bungkus"] = 0
                 st.session_state["draft_bumo"] = ""
+                st.session_state["draft_brand"] = ""
+                st.session_state["draft_gender"] = "L"
+                st.session_state["draft_range_umur"] = ""
                 st.session_state["spg_form_nonce"] = spg_nonce + 1
                 st.session_state["spg_last_saved_msg"] = (
-                    f"🎉 Laporan konsumen **{nama_konsumen}** oleh SPG **{str(nama_spg_manual).strip()}** berhasil disimpan!"
+                    f"Laporan konsumen '{nama_konsumen.strip()}' ({jumlah_bungkus} bks {brand_entry}) berhasil disimpan!"
                 )
                 st.rerun()
-else:
-    if not is_inside_geofence:
-        st.warning(f"🔒 Form input terkunci karena posisi GPS Anda berada di luar wilayah {st.session_state['kota_kab']}.")
-    else:
-        st.info("ℹ️ Identitas SPG belum tersedia untuk membuka form.")
 
-# --- 3. KETERANGAN DI BAWAH FORM (TITIK LKK HIDE/UNHIDE DEFAULT HIDE, GPS AKTIF, TOTAL ROKOK LAKU) ---
+# --- 3. BLOK TITIK KUNJUNGAN LAPANGAN (DEFAULT HIDE / UNHIDE) ---
 st.markdown("---")
-is_titik_lkk_shown = bool(st.session_state.get("show_titik_lkk_spg", False))
-col_lkk_hdr, col_lkk_toggle = st.columns([0.72, 0.28])
-with col_lkk_hdr:
-    st.markdown('<div class="section-title" style="margin: 6px 0;">📍 Titik Kunjungan Lapangan</div>', unsafe_allow_html=True)
-with col_lkk_toggle:
-    toggle_label = "🙈 Hide" if is_titik_lkk_shown else "👁️ Unhide"
+col_titik_hdr, col_titik_toggle = st.columns([0.65, 0.35])
+with col_titik_hdr:
+    st.markdown('<div class="section-title" style="margin:0;">📍 Titik Kunjungan Lapangan</div>', unsafe_allow_html=True)
+with col_titik_toggle:
+    is_titik_shown = bool(st.session_state.get("show_titik_lkk_spg", False))
+    toggle_label = "🙈 Hide Titik LKK" if is_titik_shown else "👁️ Unhide Titik LKK"
     if st.button(toggle_label, key="btn_toggle_titik_lkk_spg", use_container_width=True):
-        st.session_state["show_titik_lkk_spg"] = not is_titik_lkk_shown
+        st.session_state["show_titik_lkk_spg"] = not is_titik_shown
         st.rerun()
 
-if is_titik_lkk_shown:
+if st.session_state.get("show_titik_lkk_spg", False):
     with st.container(border=True):
-        col_spg_s1, col_spg_s2 = st.columns([0.78, 0.22])
-        with col_spg_s1:
-            if locked_point_today:
-                st_lock_spg = locked_point_today.get("status_kunjungan", VISIT_STATUS_WAJIB)
-                kontak_info = (
-                    f" • Kontak Tim Tersimpan: **{latest_sup_contact['kontak']}**"
-                    if latest_sup_contact and latest_sup_contact.get("warkop", "").casefold() == locked_point_today["warkop"].casefold()
-                    else ""
-                )
+        col_spg_ref1, col_spg_ref2 = st.columns([0.78, 0.22])
+        with col_spg_ref1:
+            if has_locked_lkk:
                 st.success(
-                    f"🔒 **Titik LKK Terkunci (Dari Supervisi):** **{locked_point_today['warkop']}** "
-                    f"({locked_point_today['kecamatan']} • **{st_lock_spg}**){kontak_info}"
+                    f"🔒 **Titik LKK Terkunci oleh Supervisi:** **{nama_warkop_manual}** "
+                    f"({kecamatan_pilihan} • **{status_warkop_terpilih}**)"
                 )
             else:
-                st.error(
-                    "⛔ **Menunggu Supervisi Save Titik LKK.** Form input SPG belum dibuka sampai Supervisi memilih dan menyimpan (lock) titik lokasi LKK hari ini."
+                st.warning(
+                    "⚠️ **Belum ada Titik LKK yang di-save / di-lock Supervisi hari ini.** "
+                    "Klik **🔄 Refresh** setelah Supervisi menyimpan Titik LKK."
                 )
-        with col_spg_s2:
+        with col_spg_ref2:
             st.markdown("<div style='height: 18px;'></div>", unsafe_allow_html=True)
-            if st.button("🔄 Refresh", key="btn_refresh_spg_sync", use_container_width=True):
+            if st.button("🔄 Refresh", key="btn_refresh_spg_locked_lkk", use_container_width=True):
                 st.rerun()
 
         st.markdown(f"""
         <div class="address-box">
-            📍 <b>Kecamatan:</b> {kecamatan_pilihan} &nbsp;|&nbsp; <b>Warkop / LKK:</b> {nama_warkop_manual or '(Belum di-save Supervisi)'} &nbsp;|&nbsp; <b>Status:</b> {status_warkop_terpilih}<br/>
+            📍 <b>Kecamatan:</b> {kecamatan_pilihan} &nbsp;|&nbsp; <b>Warkop / LKK:</b> {nama_warkop_manual or '(Belum di-lock Supervisi)'} &nbsp;|&nbsp; <b>Status:</b> {status_warkop_terpilih}<br/>
             🏠 <b>Alamat:</b> {alamat_warkop_terpilih}
         </div>
         """, unsafe_allow_html=True)
 
-if is_inside_geofence:
-    st.success(
-        f"📍 **GPS Aktif:** `{user_lat:.6f}`, `{user_lon:.6f}` (±{akurasi_meter}m) — **{st.session_state['kota_kab']}**"
-    )
+# --- 4. RINGKASAN PERFORMA ---
+st.markdown("---")
+st.markdown(f"### 📈 Ringkasan Performa: {st.session_state['user_spg']} ({nama_spg_manual or 'Semua SPG'})")
+
+df_all = load_database()
+if not df_all.empty and "Promotor" in df_all.columns:
+    df_user = df_all[df_all["Promotor"] == st.session_state["user_spg"]].copy()
 else:
-    st.warning(
-        f"⚠️ **Info GPS:** Posisi Anda terdeteksi di luar poligon zona "
-        f"{st.session_state['kota_kab']} (Lat: `{user_lat:.6f}`, Lon: `{user_lon:.6f}`)."
-    )
+    df_user = pd.DataFrame(columns=EXPECTED_COLUMNS)
 
-df_db_spg_top = load_database()
-spg_active_clean = str(nama_spg_manual or "").strip()
-team_active_clean = str(st.session_state["user_spg"] or "").strip()
+if not df_user.empty:
+    df_user["Waktu_Dt"] = pd.to_datetime(df_user["Waktu"], errors="coerce")
+    df_user["Tanggal"] = df_user["Waktu_Dt"].dt.strftime("%d-%m-%Y")
+    df_user = add_custom_week_columns(df_user, "Waktu_Dt")
+    df_user["Jumlah_Bungkus"] = pd.to_numeric(df_user["Jumlah_Bungkus"], errors="coerce").fillna(0)
 
-total_laku_spg_today = 0
-total_laku_team_today = 0
-brands_spg_today = []
+    today_dt = datetime.utcnow() + timedelta(hours=7)
+    today_str = today_dt.strftime("%d-%m-%Y")
+    current_week_label, _ = get_custom_week_info(today_dt)
+    current_month_str = today_dt.strftime("%m-%Y")
 
-if not df_db_spg_top.empty and "Promotor" in df_db_spg_top.columns:
-    df_db_spg_top["Jumlah_Bungkus"] = pd.to_numeric(df_db_spg_top["Jumlah_Bungkus"], errors="coerce").fillna(0)
-    mask_team_today = (
-        (df_db_spg_top["Promotor"].astype(str).str.strip().str.casefold() == team_active_clean.casefold())
-        & (df_db_spg_top["Waktu"].astype(str).str.startswith(today_str_spg))
-    )
-    df_team_today_top = df_db_spg_top[mask_team_today]
-    total_laku_team_today = int(df_team_today_top["Jumlah_Bungkus"].sum())
+    df_today_u = df_user[df_user["Tanggal"] == today_str].copy()
+    omset_hari_ini_u = int(df_today_u["Jumlah_Bungkus"].sum())
+    konsumen_hari_ini_u = len(df_today_u)
 
-    if spg_active_clean:
-        df_spg_today_top = df_team_today_top[
-            df_team_today_top["Nama_SPG"].astype(str).str.strip().str.casefold() == spg_active_clean.casefold()
-        ]
-        total_laku_spg_today = int(df_spg_today_top["Jumlah_Bungkus"].sum())
-        brands_spg_today = df_spg_today_top["Brand_Rokok"].dropna().astype(str).unique().tolist()
+    if not df_today_u.empty:
+        df_today_u_lb = (
+            df_today_u.groupby(["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Brand_Rokok"])
+            .agg(Total_Omset_Team=("Jumlah_Bungkus", "sum"))
+            .reset_index()
+        )
+        df_today_u_lb["Brand_Rokok_Clean"] = df_today_u_lb["Brand_Rokok"].apply(clean_brand_target_name)
+        df_today_u_lb = (
+            df_today_u_lb.groupby(["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Brand_Rokok_Clean"])
+            .agg(Total_Omset_Team=("Total_Omset_Team", "sum"))
+            .reset_index()
+            .rename(columns={"Brand_Rokok_Clean": "Brand_Rokok"})
+        )
+        df_today_u_lb["Target_Team"] = df_today_u_lb["Brand_Rokok"].apply(
+            lambda brand: get_target_for_brand(brand, "target_team", 50)
+        )
+        target_hari_ini_u = int(df_today_u_lb["Target_Team"].sum())
+    else:
+        target_hari_ini_u = 100
 
-brands_for_target = personnel_spg_today.get("brands", []) or brands_spg_today
-if brands_for_target:
-    target_spg_today = max(int(get_target_for_brand(b, "target_spg", 30)) for b in brands_for_target)
-else:
-    target_spg_today = 30
+    if target_hari_ini_u <= 0:
+        target_hari_ini_u = 100
 
-is_achieved_today = total_laku_spg_today >= target_spg_today
-kurang_target_today = max(0, target_spg_today - total_laku_spg_today)
-status_badge_spg = (
-    '<span style="background:#DCFCE7;color:#15803D;padding:5px 14px;border-radius:999px;font-weight:700;font-size:0.88rem;">✅ ACHIEVED</span>'
-    if is_achieved_today
-    else f'<span style="background:#FEE2E2;color:#B91C1C;padding:5px 14px;border-radius:999px;font-weight:700;font-size:0.88rem;">⏳ BELUM ACHIEVED (Kurang {kurang_target_today} bks)</span>'
-)
+    persen_pencapaian_u = int((omset_hari_ini_u / target_hari_ini_u) * 100) if target_hari_ini_u > 0 else 0
 
-st.markdown(
-    f"""
-    <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:12px;padding:14px 18px;margin:10px 0 14px 0;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+    df_week_u = df_user[df_user["Periode_Minggu"] == current_week_label]
+    omset_minggu_ini_u = int(df_week_u["Jumlah_Bungkus"].sum())
+    konsumen_minggu_ini_u = len(df_week_u)
+
+    df_user["Bulan_Tahun"] = df_user["Waktu_Dt"].dt.strftime("%m-%Y")
+    df_month_u = df_user[df_user["Bulan_Tahun"] == current_month_str]
+    omset_bulan_ini_u = int(df_month_u["Jumlah_Bungkus"].sum())
+    konsumen_bulan_ini_u = len(df_month_u)
+
+    kpi_u1, kpi_u2, kpi_u3 = st.columns(3)
+    with kpi_u1:
+        st.markdown(f"""
+        <div class="dashboard-card">
             <div>
-                <div style="font-size:0.82rem;color:#64748B;font-weight:600;">🚬 TOTAL ROKOK LAKU TERJUAL HARI INI ({spg_active_clean or 'SPG'})</div>
-                <div style="font-size:1.7rem;font-weight:800;color:#0F172A;line-height:1.2;">
-                    {total_laku_spg_today:,} <span style="font-size:0.95rem;font-weight:600;color:#475569;">/ {target_spg_today:,} bungkus</span>
-                </div>
-                <div style="font-size:0.8rem;color:#64748B;margin-top:2px;">Total terjual tim hari ini (2 SPG): <b>{total_laku_team_today:,} bungkus</b></div>
+                <div class="card-value">{omset_hari_ini_u:,} bks</div>
+                <div class="card-subtext">dari {target_hari_ini_u} target bks</div>
             </div>
-            <div>{status_badge_spg}</div>
+            <div class="card-label">Omset Hari Ini</div>
         </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+        """, unsafe_allow_html=True)
+    with kpi_u2:
+        bar_w_u = min(persen_pencapaian_u, 100)
+        st.markdown(f"""
+        <div class="dashboard-card">
+            <div>
+                <div class="card-value-green">{persen_pencapaian_u}%</div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar-fill" style="width: {bar_w_u}%;"></div>
+                </div>
+            </div>
+            <div class="card-label">Pencapaian Omset Hari Ini</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with kpi_u3:
+        st.markdown(f"""
+        <div class="dashboard-card">
+            <div>
+                <div class="card-value">{konsumen_hari_ini_u:,}</div>
+                <div class="card-subtext" style="opacity: 0;">-</div>
+            </div>
+            <div class="card-label">Konsumen Beli Hari Ini</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    kpi_u4, kpi_u5, kpi_u6 = st.columns(3)
+    with kpi_u4:
+        st.markdown(f"""
+        <div class="dashboard-card">
+            <div>
+                <div class="card-value">{omset_minggu_ini_u:,} bks</div>
+                <div class="card-subtext">{konsumen_minggu_ini_u:,} Konsumen Minggu Ini</div>
+            </div>
+            <div class="card-label">Omset Minggu Ini</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with kpi_u5:
+        st.markdown(f"""
+        <div class="dashboard-card">
+            <div>
+                <div class="card-value">{omset_bulan_ini_u:,} bks</div>
+                <div class="card-subtext" style="opacity: 0;">-</div>
+            </div>
+            <div class="card-label">Omset Bulan Ini</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with kpi_u6:
+        st.markdown(f"""
+        <div class="dashboard-card">
+            <div>
+                <div class="card-value">{konsumen_bulan_ini_u:,}</div>
+                <div class="card-subtext" style="opacity: 0;">-</div>
+            </div>
+            <div class="card-label">Konsumen Beli Bulan Ini</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    all_weeks_u = sorted(df_user["Periode_Minggu"].dropna().unique().tolist(), reverse=True)
+    all_dates_u = sorted(df_user["Tanggal"].dropna().unique().tolist(), reverse=True)
+    all_spgs_u = sorted(df_user["Nama_SPG"].dropna().unique().tolist())
+
+    st.markdown("---")
+    st.markdown("### 👩‍💼 Pencapaian Per SPG (Berdasarkan Target SPG)")
+
+    col_spg_w, col_spg_tgl, col_spg_nm = st.columns(3)
+    with col_spg_w:
+        filter_spg_week = st.multiselect("Filter Periode Minggu (Pencapaian SPG)", options=all_weeks_u, default=all_weeks_u, key="user_spg_week")
+    with col_spg_tgl:
+        filter_spg_tgl = st.multiselect("Filter Tanggal (Pencapaian SPG)", options=all_dates_u, default=all_dates_u, key="user_spg_tgl")
+    with col_spg_nm:
+        filter_spg_nm = st.multiselect("Filter Nama SPG (Pencapaian SPG)", options=all_spgs_u, default=all_spgs_u, key="user_spg_nm")
+
+    df_spg_filtered = df_user.copy()
+    if filter_spg_week:
+        df_spg_filtered = df_spg_filtered[df_spg_filtered["Periode_Minggu"].isin(filter_spg_week)]
+    if filter_spg_tgl:
+        df_spg_filtered = df_spg_filtered[df_spg_filtered["Tanggal"].isin(filter_spg_tgl)]
+    if filter_spg_nm:
+        df_spg_filtered = df_spg_filtered[df_spg_filtered["Nama_SPG"].isin(filter_spg_nm)]
+
+    if not df_spg_filtered.empty:
+        df_spg_achievement = (
+            df_spg_filtered.groupby(["Tanggal", "Periode_Minggu", "Promotor", "Nama_SPG", "Kota_Kab", "Brand_Rokok"])
+            .agg(Total_Omset_SPG=("Jumlah_Bungkus", "sum"), Total_Konsumen_Beli=("Nama_Konsumen", "count"))
+            .reset_index()
+        )
+        df_spg_achievement["Brand_Rokok_Clean"] = df_spg_achievement["Brand_Rokok"].apply(clean_brand_target_name)
+        df_spg_achievement = (
+            df_spg_achievement.groupby(["Tanggal", "Periode_Minggu", "Promotor", "Nama_SPG", "Kota_Kab", "Brand_Rokok_Clean"])
+            .agg(Total_Omset_SPG=("Total_Omset_SPG", "sum"), Total_Konsumen_Beli=("Total_Konsumen_Beli", "sum"))
+            .reset_index()
+            .rename(columns={"Brand_Rokok_Clean": "Brand_Rokok"})
+        )
+        df_spg_achievement["Target_SPG"] = df_spg_achievement["Brand_Rokok"].apply(
+            lambda brand: get_target_for_brand(brand, "target_spg", 25)
+        )
+        df_spg_achievement["Status_Target_SPG"] = df_spg_achievement.apply(
+            lambda r: "Achieved" if r["Total_Omset_SPG"] >= r["Target_SPG"] else "Not Achieved",
+            axis=1
+        )
+        cols_spg_order = ["Tanggal", "Periode_Minggu", "Promotor", "Nama_SPG", "Kota_Kab", "Brand_Rokok", "Total_Omset_SPG", "Total_Konsumen_Beli", "Target_SPG", "Status_Target_SPG"]
+        df_spg_achievement = df_spg_achievement[[c for c in cols_spg_order if c in df_spg_achievement.columns]]
+
+        st.dataframe(df_spg_achievement.style.map(style_status_target, subset=["Status_Target_SPG"]), use_container_width=True)
+    else:
+        st.info("Tidak ada data untuk filter Pencapaian SPG yang dipilih.")
+
+    st.markdown("---")
+    st.markdown("### 🏆 Pencapaian Team SPG (Berdasarkan Target Team)")
+
+    col_tm_w, col_tm_tgl = st.columns(2)
+    with col_tm_w:
+        filter_tm_week = st.multiselect("Filter Periode Minggu (Pencapaian Team)", options=all_weeks_u, default=all_weeks_u, key="user_tm_week")
+    with col_tm_tgl:
+        filter_tm_tgl = st.multiselect("Filter Tanggal (Pencapaian Team)", options=all_dates_u, default=all_dates_u, key="user_tm_tgl")
+
+    df_tm_filtered = df_user.copy()
+    if filter_tm_week:
+        df_tm_filtered = df_tm_filtered[df_tm_filtered["Periode_Minggu"].isin(filter_tm_week)]
+    if filter_tm_tgl:
+        df_tm_filtered = df_tm_filtered[df_tm_filtered["Tanggal"].isin(filter_tm_tgl)]
+
+    if not df_tm_filtered.empty:
+        df_tm_achievement = (
+            df_tm_filtered.groupby(["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Brand_Rokok"])
+            .agg(Total_Omset_Team=("Jumlah_Bungkus", "sum"), Total_Konsumen_Beli=("Nama_Konsumen", "count"))
+            .reset_index()
+        )
+        df_tm_achievement["Brand_Rokok_Clean"] = df_tm_achievement["Brand_Rokok"].apply(clean_brand_target_name)
+        df_tm_achievement = (
+            df_tm_achievement.groupby(["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Brand_Rokok_Clean"])
+            .agg(Total_Omset_Team=("Total_Omset_Team", "sum"), Total_Konsumen_Beli=("Total_Konsumen_Beli", "sum"))
+            .reset_index()
+            .rename(columns={"Brand_Rokok_Clean": "Brand_Rokok"})
+        )
+        df_tm_achievement["Target_Team"] = df_tm_achievement["Brand_Rokok"].apply(
+            lambda brand: get_target_for_brand(brand, "target_team", 50)
+        )
+        df_tm_achievement["Status_Target_Team"] = df_tm_achievement.apply(
+            lambda r: "Achieved" if r["Total_Omset_Team"] >= r["Target_Team"] else "Not Achieved",
+            axis=1
+        )
+        cols_tm_order = ["Tanggal", "Periode_Minggu", "Promotor", "Kota_Kab", "Brand_Rokok", "Total_Omset_Team", "Total_Konsumen_Beli", "Target_Team", "Status_Target_Team"]
+        df_tm_achievement = df_tm_achievement[[c for c in cols_tm_order if c in df_tm_achievement.columns]]
+
+        st.dataframe(df_tm_achievement.style.map(style_status_target, subset=["Status_Target_Team"]), use_container_width=True)
+    else:
+        st.info("Tidak ada data untuk filter Pencapaian Team yang dipilih.")
+
+    st.markdown("---")
+    st.markdown("### 📑 Riwayat Laporan Anda")
+    st.dataframe(df_user.drop(columns=["Waktu_Dt", "Periode_Minggu", "Tanggal", "Bulan_Tahun"], errors="ignore").tail(20), use_container_width=True)
+else:
+    st.info("Belum ada data laporan untuk akun ini.")
+
+st.markdown("""
+<div class="footer-note">
+    © 2026 Tumarso Monitoring System
+</div>
+""", unsafe_allow_html=True)
