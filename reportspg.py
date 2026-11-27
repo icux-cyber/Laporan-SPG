@@ -1250,8 +1250,7 @@ def _resolve_kecamatan_filepath(nm_kecamatan: str) -> str | None:
 
 
 @st.cache_data(ttl=3600, max_entries=40, show_spinner=False)
-def load_kecamatan_geojson(nm_kecamatan: str) -> dict | None:
-    """Memuat file GeoJSON 1 kecamatan. Cache by nama — tidak lagi by mtime."""
+def load_kecamatan_geojson(nm_kecamatan: str, mtime: float = 0.0) -> dict | None:
     filepath = _resolve_kecamatan_filepath(nm_kecamatan)
     if not filepath:
         return None
@@ -1262,10 +1261,9 @@ def load_kecamatan_geojson(nm_kecamatan: str) -> dict | None:
         st.error(f"Gagal memuat GeoJSON kecamatan '{nm_kecamatan}': {e}")
         return None
 
-
 @st.cache_data(ttl=3600, max_entries=40, show_spinner=False)
-def load_kecamatan_gdf(nm_kecamatan: str):
-    data = load_kecamatan_geojson(nm_kecamatan)
+def load_kecamatan_gdf(nm_kecamatan: str, mtime: float = 0.0):
+    data = load_kecamatan_geojson(nm_kecamatan, mtime)
     if not data:
         return None
     try:
