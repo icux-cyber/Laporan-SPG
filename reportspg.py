@@ -2009,7 +2009,7 @@ def render_rekapitulasi_penjualan_report(team_name: str, target_date_str: str, a
     total_uang_2spg_today = int(df_team_spg_today["Total_Uang_Rp"].sum()) if not df_team_spg_today.empty else 0
 
     # --- 1. REKAP PENJUALAN 2 SPG & KONTROL STOK ROKOK ---
-    st.markdown(f"### 1️⃣ Rekap Penjualan 2 SPG & Kontrol Stok Rokok ({team_name})")
+    st.markdown(f"### 1️⃣ Rekap Penjualan & Stok Rokok ({team_name})")
     st.caption("Dashboard Monitoring")
 
     st.info(
@@ -4256,7 +4256,7 @@ if st.session_state["login_mode"] == "Supervisi":
         """, unsafe_allow_html=True)
 
     st.markdown("---")
-    st.markdown("### 👀 Dashboard Monitoring & Entry Supervisi: Team Super AA 1 (Plat Mobil: L 1234 ABC)")
+    st.markdown("### Dashboard Monitoring : Team Super AA 1 (Plat Mobil: L 1234 ABC)")
 
     sup_nonce = st.session_state.get("sup_kontak_nonce", 0)
     with st.form(f"form_entry_kontak_supervisi_{sup_nonce}"):
